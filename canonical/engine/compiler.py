@@ -404,13 +404,20 @@ class LLMCompiler:
             if not isinstance(v_data, dict):
                 continue
             
+            # Ensure evidence_required is a list
+            evidence = v_data.get("evidence_required", [])
+            if isinstance(evidence, str):
+                evidence = [evidence]
+            elif not isinstance(evidence, list):
+                evidence = []
+            
             vv = VV(
                 vv_id=v_data.get("vv_id", f"VV-{len(vv_items)+1}"),
                 task_id=v_data.get("task_id", ""),
                 type=VVType(v_data.get("type", "manual")),
                 procedure=v_data.get("procedure", ""),
                 expected_result=v_data.get("expected_result", ""),
-                evidence_required=v_data.get("evidence_required", []),
+                evidence_required=evidence,
             )
             vv_items.append(vv)
         

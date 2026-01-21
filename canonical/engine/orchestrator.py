@@ -249,11 +249,15 @@ class Orchestrator:
             self._current_run_id = self.snapshot_store.generate_run_id()
             self._step_seq = 0
         
-        # Step: Manual Review
+        # Step: Manual Review (read-only step, doesn't generate new version)
         spec = self._step_manual_review(spec, decision, rationale)
         
-        # Save updated spec
-        self.spec_store.save(spec)
+        # Update the existing spec file in place (manual_review is read-only, no new version)
+        spec_file = self.spec_store.base_dir / feature_id / f"{spec.meta.spec_version}.json"
+        if spec_file.exists():
+            import json
+            with open(spec_file, 'w', encoding='utf-8') as f:
+                json.dump(spec.model_dump(mode='json'), f, indent=2, ensure_ascii=False, default=str)
         
         return spec
 
