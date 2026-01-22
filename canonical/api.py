@@ -133,6 +133,11 @@ async def get_feature(feature_id: str):
             spec_data = json.load(f)
             spec = CanonicalSpec.model_validate(spec_data)
         
+        # Validate gates to get current gate_result
+        from canonical.engine.gate import GateEngine
+        gate_engine = GateEngine()
+        gate_result = gate_engine.validate(spec)
+        
         return {
             "feature_id": spec.feature.feature_id,
             "feature": {
@@ -141,6 +146,12 @@ async def get_feature(feature_id: str):
                 "status": spec.feature.status.value if isinstance(spec.feature.status, FeatureStatus) else spec.feature.status,
             },
             "spec": spec.model_dump(mode='json'),
+            "gate_result": {
+                "overall_pass": gate_result.overall_pass,
+                "completeness_score": gate_result.completeness_score,
+                "next_action": gate_result.next_action,
+                "clarify_questions": [q.model_dump() for q in gate_result.clarify_questions],
+            }
         }
     except HTTPException:
         raise
@@ -161,14 +172,49 @@ async def run_pipeline(input: dict):
         
         return {
             "feature_id": spec.feature.feature_id,
-            "status": "success",
+            "status": spec.feature.status.value if isinstance(spec.feature.status, FeatureStatus) else spec.feature.status,
             "message": "Feature created successfully",
             "gate_result": {
                 "overall_pass": gate_result.overall_pass,
                 "completeness_score": gate_result.completeness_score,
                 "next_action": gate_result.next_action,
+                "clarify_questions": [q.model_dump() for q in gate_result.clarify_questions],
             }
         }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/features/{feature_id}/answer")
+async def answer_feature(feature_id: str, body: dict):
+    """Apply answers and re-validate"""
+    try:
+        answers = body.get("answers", {})
+        if not answers:
+            raise HTTPException(status_code=400, detail="Answers are required")
+        
+        # Apply answers and re-validate
+        spec, gate_result = orchestrator.answer(feature_id, answers)
+        
+        return {
+            "feature_id": spec.feature.feature_id,
+            "feature": {
+                "feature_id": spec.feature.feature_id,
+                "title": spec.feature.title or "",
+                "status": spec.feature.status.value if isinstance(spec.feature.status, FeatureStatus) else spec.feature.status,
+            },
+            "spec": spec.model_dump(mode='json'),
+            "gate_result": {
+                "overall_pass": gate_result.overall_pass,
+                "completeness_score": gate_result.completeness_score,
+                "next_action": gate_result.next_action,
+                "clarify_questions": [q.model_dump() for q in gate_result.clarify_questions],
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         import traceback
         traceback.print_exc()

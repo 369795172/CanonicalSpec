@@ -168,6 +168,83 @@ header {
   color: var(--exploration) !important;
 }
 
+/* Clarification Panel */
+.clarification-panel {
+  background: rgba(255, 170, 68, 0.05);
+  border: 1px solid rgba(255, 170, 68, 0.2);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.clarification-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--exploration);
+}
+
+.question-item {
+  margin-bottom: 16px;
+}
+
+.question-item:last-of-type {
+  margin-bottom: 0;
+}
+
+.question-item label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--text-main);
+  font-size: 0.95rem;
+}
+
+.field-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  font-family: 'Monaco', 'Consolas', monospace;
+}
+
+.question-item textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+  background: var(--card-bg);
+  color: var(--text-main);
+  margin-bottom: 0;
+}
+
+.question-item textarea:focus {
+  outline: none;
+  border-color: var(--exploration);
+  background: #1a1a1a;
+}
+
+.clarifying-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  background: rgba(255, 170, 68, 0.1);
+  border: 1px solid rgba(255, 170, 68, 0.3);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--exploration);
+  width: fit-content;
+}
+
 /* Empty State */
 .empty-state {
   flex: 1;
@@ -618,15 +695,14 @@ textarea::placeholder {
   border-radius: 12px;
   width: 40px;
   height: 40px;
-  display: flex;
+  display: grid;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s ease;
   color: var(--text-dim);
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
+  position: static;
+  box-sizing: content-box;
 }
 
 .btn-voice:hover:not(:disabled) {

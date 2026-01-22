@@ -310,6 +310,12 @@ const App = () => {
                       <p className="feature-description">
                         {feature.spec?.feature?.goal || '点击查看详情'}
                       </p>
+                      {feature.status === 'clarifying' && (
+                        <div className="clarifying-indicator">
+                          <HelpCircle size={14} />
+                          <span>需要补充信息</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -398,7 +404,7 @@ const App = () => {
               }
             }}
           />
-          <div style={{ position: 'absolute', right: '20px', bottom: '20px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ position: 'static', right: '20px', bottom: '20px', display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center' }}>
             {isTranscribing && (
               <div className="transcribing-indicator">
                 <div className="loader" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
@@ -459,14 +465,60 @@ const App = () => {
   );
 };
 
+// Clarification Panel Component
+const ClarificationPanel = ({ questions, answers, setAnswers, onSubmit, isSubmitting }) => {
+  if (!questions || questions.length === 0) return null;
+
+  return (
+    <div className="clarification-panel">
+      <div className="clarification-header">
+        <HelpCircle size={18} />
+        <span>需要补充的信息 ({questions.length})</span>
+      </div>
+      {questions.map((q, i) => (
+        <div key={q.id || i} className="question-item">
+          <label>{q.question}</label>
+          <span className="field-hint">字段: {q.field_path}</span>
+          <textarea
+            value={answers[q.field_path] || ''}
+            onChange={(e) => setAnswers({...answers, [q.field_path]: e.target.value})}
+            placeholder="请输入..."
+            rows={3}
+          />
+        </div>
+      ))}
+      <button 
+        onClick={onSubmit} 
+        disabled={isSubmitting || Object.keys(answers).length === 0}
+        className="btn-primary"
+        style={{ marginTop: '16px', width: '100%' }}
+      >
+        {isSubmitting ? '提交中...' : '提交答案'}
+      </button>
+    </div>
+  );
+};
+
 // Feature Detail View Component
 const FeatureDetailView = ({ featureId, onBack }) => {
   const [featureData, setFeatureData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [clarifyQuestions, setClarifyQuestions] = useState([]);
+  const [answers, setAnswers] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     fetchFeatureDetails();
   }, [featureId]);
+
+  useEffect(() => {
+    if (featureData?.gate_result?.clarify_questions) {
+      setClarifyQuestions(featureData.gate_result.clarify_questions);
+    } else {
+      setClarifyQuestions([]);
+    }
+    setAnswers({});
+  }, [featureData]);
 
   const fetchFeatureDetails = async () => {
     setLoading(true);
@@ -485,6 +537,30 @@ const FeatureDetailView = ({ featureId, onBack }) => {
       console.error('Failed to fetch feature details:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSubmitAnswers = async () => {
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`/api/v1/features/${featureId}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFeatureData(data);
+        setAnswers({});
+      } else {
+        const error = await res.json();
+        alert(`提交失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to submit answers:', err);
+      alert('提交答案失败，请重试');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -528,6 +604,17 @@ const FeatureDetailView = ({ featureId, onBack }) => {
       </div>
 
       <div className="detail-content">
+        {/* Clarification Panel */}
+        {feature.status === 'clarifying' && clarifyQuestions.length > 0 && (
+          <ClarificationPanel
+            questions={clarifyQuestions}
+            answers={answers}
+            setAnswers={setAnswers}
+            onSubmit={handleSubmitAnswers}
+            isSubmitting={isSubmitting}
+          />
+        )}
+
         {spec && (
           <>
             {/* Spec Header */}
