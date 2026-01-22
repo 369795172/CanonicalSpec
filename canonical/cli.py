@@ -65,20 +65,50 @@ def cli():
 
 
 @cli.command()
-@click.argument('input_text')
+@click.argument('input_text', required=False)
+@click.option('--input', '-i', 'input_file', type=click.Path(exists=True), help='从文件读取需求描述')
 @click.option('--feature-id', '-f', help='指定 Feature ID (可选，默认自动生成)')
 @click.option('--output', '-o', type=click.Path(), help='输出 spec 到文件')
-def run(input_text: str, feature_id: Optional[str], output: Optional[str]):
+def run(input_text: Optional[str], input_file: Optional[str], feature_id: Optional[str], output: Optional[str]):
     """
     执行初始 Pipeline: 输入 -> 编译 -> 验证
     
-    INPUT_TEXT: 需求描述文本
+    支持两种输入方式：
+    1. 通过 --input/-i 选项指定文件路径
+    2. 直接在命令行传递文本内容（INPUT_TEXT）
+    
+    如果两者都提供，优先使用 --input 文件。
     """
-    click.echo(f"正在处理输入: {input_text[:50]}...")
+    # 确定输入内容
+    final_input_text = None
+    
+    if input_file:
+        # 从文件读取
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f:
+                final_input_text = f.read()
+            click.echo(f"从文件读取输入: {input_file}")
+        except Exception as e:
+            click.echo(f"\n✗ 读取文件失败: {str(e)}", err=True)
+            sys.exit(2)
+    elif input_text:
+        # 使用命令行参数
+        final_input_text = input_text
+    else:
+        # 两者都未提供
+        click.echo("错误: 必须提供输入内容。使用方式：", err=True)
+        click.echo("  1. python -m canonical.cli run --input <文件路径>")
+        click.echo("  2. python -m canonical.cli run \"需求描述文本\"")
+        sys.exit(1)
+    
+    if input_file and input_text:
+        click.echo("警告: 同时提供了 --input 文件和命令行文本，将使用文件内容", err=True)
+    
+    click.echo(f"正在处理输入: {final_input_text[:50]}...")
     
     try:
         orchestrator = Orchestrator()
-        spec, gate_result = orchestrator.run(input_text, feature_id)
+        spec, gate_result = orchestrator.run(final_input_text, feature_id)
         
         print_spec_summary(spec)
         print_gate_result(gate_result)
