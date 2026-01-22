@@ -44,6 +44,13 @@ class CanonicalConfig(BaseSettings):
     default_project_record_id: Optional[str] = Field(None, description="Default project record ID")
     default_mentor_user_id: Optional[str] = Field(None, description="Default mentor user ID")
     default_intern_user_id: Optional[str] = Field(None, description="Default intern user ID")
+    
+    # AI Builder Space Configuration
+    ai_builder_token: Optional[str] = Field(None, description="AI Builder Space API token")
+    ai_builder_base_url: str = Field(
+        "https://space.ai-builders.com/backend/v1",
+        description="AI Builder Space API base URL"
+    )
 
     model_config = {
         "env_prefix": "CANONICAL_",

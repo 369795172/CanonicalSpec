@@ -14,6 +14,7 @@ from canonical.config import config
 from canonical.models.spec import CanonicalSpec, FeatureStatus
 from canonical.engine.orchestrator import Orchestrator
 from canonical.store.spec_store import SpecStore
+from canonical.services.ai_client import AIClient
 
 app = FastAPI(
     title="Canonical Spec API",
@@ -33,6 +34,24 @@ app.add_middleware(
 # Initialize stores
 spec_store = SpecStore(base_dir=config.data_dir / "specs")
 orchestrator = Orchestrator(spec_store=spec_store)
+
+# Initialize AI client for audio transcription (optional)
+ai_client: Optional[AIClient] = None
+
+
+@app.on_event("startup")
+async def startup():
+    """Initialize AI client on startup if token is configured."""
+    global ai_client
+    if config.ai_builder_token:
+        try:
+            ai_client = AIClient(
+                token=config.ai_builder_token,
+                base_url=config.ai_builder_base_url
+            )
+        except Exception as e:
+            print(f"Warning: Failed to initialize AI client: {e}")
+            ai_client = None
 
 
 @app.get("/")
@@ -159,32 +178,28 @@ async def run_pipeline(input: dict):
 @app.post("/api/transcribe")
 async def transcribe_audio(audio_file: UploadFile = File(...)):
     """
-    Transcribe audio to text
-    Note: This is a placeholder implementation.
-    In production, integrate with a speech-to-text service like OpenAI Whisper API.
+    Transcribe audio to text using AI Builder Space API.
+    
+    Requires CANONICAL_AI_BUILDER_TOKEN environment variable to be set.
     """
     try:
+        # Check if AI client is configured
+        if not ai_client:
+            return {
+                "text": "",
+                "message": "Transcription service not configured. Please set CANONICAL_AI_BUILDER_TOKEN environment variable to enable voice input."
+            }
+        
         # Read audio file
         audio_data = await audio_file.read()
         
-        # TODO: Implement actual transcription
-        # For now, return a placeholder response
-        # In production, use OpenAI Whisper API or similar service:
-        # 
-        # from openai import OpenAI
-        # client = OpenAI(api_key=config.openai_api_key)
-        # with open("temp_audio.webm", "wb") as f:
-        #     f.write(audio_data)
-        # with open("temp_audio.webm", "rb") as f:
-        #     transcript = client.audio.transcriptions.create(
-        #         model="whisper-1",
-        #         file=f
-        #     )
-        # return {"text": transcript.text}
+        # Transcribe using AI Builder Space API
+        result = await ai_client.transcribe_audio(audio_data)
         
         return {
-            "text": "",
-            "message": "Transcription service not configured. Please configure OpenAI API key to enable voice input."
+            "text": result.get("text", ""),
+            "language": result.get("detected_language"),
+            "confidence": result.get("confidence")
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")

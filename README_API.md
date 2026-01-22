@@ -35,7 +35,7 @@ npm run dev
 - **List Features**: `GET /api/v1/features`
 - **Get Feature**: `GET /api/v1/features/{feature_id}`
 - **Create Feature**: `POST /api/v1/run`
-- **Transcribe Audio**: `POST /api/transcribe` (placeholder)
+- **Transcribe Audio**: `POST /api/transcribe`
 
 ## API Documentation
 
@@ -51,14 +51,17 @@ Make sure your `.env` file contains:
 - `CANONICAL_FEISHU_APP_SECRET` - Feishu app secret
 - `CANONICAL_FEISHU_BASE_TOKEN` - Feishu base token
 - `CANONICAL_FEISHU_TABLE_ID` - Feishu table ID
+- `CANONICAL_AI_BUILDER_TOKEN` - AI Builder Space API token (for voice transcription, optional)
 
 ## Voice Transcription
 
-The `/api/transcribe` endpoint is currently a placeholder. To enable voice transcription:
+The `/api/transcribe` endpoint uses AI Builder Space API for audio transcription. To enable voice transcription:
 
-1. Add OpenAI API key to `.env`:
+1. Get your AI Builder Space API token
+2. Add the token to `.env`:
    ```
-   OPENAI_API_KEY=your_key_here
+   CANONICAL_AI_BUILDER_TOKEN=your_token_here
    ```
+3. Restart the API server
 
-2. Update `canonical/api.py` to use OpenAI Whisper API (see TODO comments in the code)
+The endpoint accepts audio files in WebM format and returns transcribed text along with detected language and confidence score.
