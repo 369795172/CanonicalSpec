@@ -24,6 +24,15 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.bak
+.env.dev
+backend/config.py
 
 # IDE
 .vscode/
@@ -38,3 +47,12 @@ Thumbs.db
 
 # Logs
 *.log
+# Input files (temporary files for creating Feishu requirements)
+inputs/
+
+# Web related
+**/web/
+node_modules
+node_modules/
+__pycache__
+pubspec.lock
