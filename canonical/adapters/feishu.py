@@ -127,7 +127,11 @@ class MappingConfig:
 feature_id: {{ feature.feature_id }}
 spec_version: {{ meta.spec_version }}
 ---
+{% if spec.background %}
+**背景**:
+{{ spec.background }}
 
+{% endif %}
 **目标**:
 {{ spec.goal }}
 

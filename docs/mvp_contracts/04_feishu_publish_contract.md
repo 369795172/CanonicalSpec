@@ -23,7 +23,7 @@
   "status": "success|partial|failed",
   "field_map_snapshot": {
     "反馈问题": "feature.title",
-    "用户故事": "spec.goal + spec.acceptance_criteria",
+    "用户故事": "spec.background + spec.goal + spec.acceptance_criteria",
     "需求状态": "待排期",
     "需求负责人": [],
     "执行成员": [],
@@ -51,7 +51,7 @@
 | 字段名（中文） | 字段类型 | 用途 | 可映射的 Spec 路径 |
 |--------------|---------|------|-------------------|
 | `反馈问题` | 文本字段 | 需求标题 | `feature.title` |
-| `用户故事` | 文本字段（长文本） | 需求详细描述 | `spec.goal + spec.acceptance_criteria + planning.tasks` |
+| `用户故事` | 文本字段（长文本） | 需求详细描述 | `spec.background + spec.goal + spec.acceptance_criteria + planning.tasks` |
 | `评审` | 单选字段 | 评审状态 | 固定值："审阅" |
 | `排期` | 单选字段 | 排期状态 | 固定值："排期" |
 | `需求状态` | 单选字段 | 需求状态 | 固定值："待排期"（MVP） |
@@ -90,6 +90,11 @@ field_mappings:
     spec_path: "spec.goal"
     transform: "template"
     template: |
+      {% if spec.background %}
+      **背景**:
+      {{ spec.background }}
+
+      {% endif %}
       **目标**:
       {{ spec.goal }}
 
