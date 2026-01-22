@@ -175,8 +175,13 @@ class LLMCompiler:
             if isinstance(ac_data, str):
                 ac = AcceptanceCriteria(id=f"AC-{i+1}", criteria=ac_data)
             elif isinstance(ac_data, dict):
+                # Validate and fix ID format if needed
+                ac_id = ac_data.get("id", f"AC-{i+1}")
+                # Ensure format is AC-N (not ACN or AC1)
+                if not ac_id.startswith("AC-") or not ac_id[3:].isdigit():
+                    ac_id = f"AC-{i+1}"
                 ac = AcceptanceCriteria(
-                    id=ac_data.get("id", f"AC-{i+1}"),
+                    id=ac_id,
                     criteria=ac_data.get("criteria", ""),
                     test_hint=ac_data.get("test_hint"),
                 )
@@ -334,8 +339,13 @@ class LLMCompiler:
                     value=t_data["estimate"].get("value", 1),
                 )
             
+            # Validate and fix task_id format if needed
+            task_id = t_data.get("task_id", f"T-{len(tasks)+1}")
+            if not task_id.startswith("T-") or not task_id[2:].isdigit():
+                task_id = f"T-{len(tasks)+1}"
+            
             task = Task(
-                task_id=t_data.get("task_id", f"T-{len(tasks)+1}"),
+                task_id=task_id,
                 title=t_data.get("title", ""),
                 type=TaskType(t_data.get("type", "dev")),
                 scope=t_data.get("scope", ""),
@@ -411,9 +421,19 @@ class LLMCompiler:
             elif not isinstance(evidence, list):
                 evidence = []
             
+            # Validate and fix vv_id format if needed
+            vv_id = v_data.get("vv_id", f"VV-{len(vv_items)+1}")
+            if not vv_id.startswith("VV-") or not vv_id[3:].isdigit():
+                vv_id = f"VV-{len(vv_items)+1}"
+            
+            # Validate and fix task_id format if needed
+            task_id = v_data.get("task_id", "")
+            if task_id and (not task_id.startswith("T-") or not task_id[2:].isdigit()):
+                task_id = ""  # Will be validated by VV model
+            
             vv = VV(
-                vv_id=v_data.get("vv_id", f"VV-{len(vv_items)+1}"),
-                task_id=v_data.get("task_id", ""),
+                vv_id=vv_id,
+                task_id=task_id,
                 type=VVType(v_data.get("type", "manual")),
                 procedure=v_data.get("procedure", ""),
                 expected_result=v_data.get("expected_result", ""),
