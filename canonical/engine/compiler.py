@@ -30,6 +30,7 @@ from canonical.models.spec import (
     Decision,
     Meta,
     Estimate,
+    ProjectContextRef,
 )
 from canonical.models.gate import ClarifyQuestion
 from canonical.config import config
@@ -195,6 +196,15 @@ class LLMCompiler:
             acceptance_criteria=acceptance_criteria,
         )
         
+        # Initialize project_context_ref from config defaults if available
+        project_context_ref = None
+        if config.default_project_record_id:
+            project_context_ref = ProjectContextRef(
+                project_record_id=config.default_project_record_id,
+                mentor_user_id=config.default_mentor_user_id,
+                intern_user_id=config.default_intern_user_id,
+            )
+        
         # Create CanonicalSpec
         return CanonicalSpec(
             feature=feature,
@@ -203,6 +213,7 @@ class LLMCompiler:
             quality=Quality(),
             decision=Decision(),
             meta=Meta(),
+            project_context_ref=project_context_ref,
         )
 
     def generate_clarify_questions(
