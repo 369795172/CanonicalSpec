@@ -26,6 +26,8 @@ from canonical.models.snapshot import (
 )
 from canonical.engine.gate import GateEngine
 from canonical.engine.compiler import LLMCompiler
+from canonical.engine.refiner import RequirementRefiner
+from canonical.models.refine import RefineResult, RefineContext
 from canonical.store.spec_store import SpecStore
 from canonical.store.snapshot_store import SnapshotStore
 
@@ -43,6 +45,7 @@ class Orchestrator:
         snapshot_store: Optional[SnapshotStore] = None,
         gate_engine: Optional[GateEngine] = None,
         compiler: Optional[LLMCompiler] = None,
+        refiner: Optional[RequirementRefiner] = None,
     ):
         """
         Initialize the Orchestrator.
@@ -52,11 +55,13 @@ class Orchestrator:
             snapshot_store: SnapshotStore instance
             gate_engine: GateEngine instance
             compiler: LLMCompiler instance
+            refiner: RequirementRefiner instance
         """
         self.spec_store = spec_store or SpecStore()
         self.snapshot_store = snapshot_store or SnapshotStore()
         self.gate_engine = gate_engine or GateEngine()
         self._compiler = compiler  # May be None if not configured
+        self._refiner = refiner  # May be None if not configured
         
         self._current_run_id: Optional[str] = None
         self._step_seq = 0
@@ -68,13 +73,30 @@ class Orchestrator:
             self._compiler = LLMCompiler()
         return self._compiler
 
-    def run(self, user_input: str, feature_id: Optional[str] = None) -> Tuple[CanonicalSpec, GateResult]:
+    @property
+    def refiner(self) -> Optional[RequirementRefiner]:
+        """Get or create the Requirement Refiner."""
+        if self._refiner is None:
+            try:
+                self._refiner = RequirementRefiner()
+            except ValueError:
+                # LLM not configured, refiner will be None
+                self._refiner = None
+        return self._refiner
+
+    def run(
+        self,
+        user_input: str,
+        feature_id: Optional[str] = None,
+        refine_result: Optional[RefineResult] = None,
+    ) -> Tuple[CanonicalSpec, GateResult]:
         """
-        Run the initial pipeline: ingest -> compile -> validate_gates.
+        Run the initial pipeline: ingest -> (refine) -> compile -> validate_gates.
         
         Args:
-            user_input: Raw user input
+            user_input: Raw user input (or refined input if refine_result is provided)
             feature_id: Optional feature ID
+            refine_result: Optional refine result from previous refinement step
             
         Returns:
             Tuple of (CanonicalSpec, GateResult)
@@ -86,11 +108,38 @@ class Orchestrator:
         # Step 1: Ingest
         ingest_result = self._step_ingest(user_input, feature_id)
         
-        # Step 2: Compile
-        spec = self._step_compile(ingest_result)
+        # Step 2: Compile (use draft_spec from refine_result if available)
+        if refine_result and refine_result.ready_to_compile and refine_result.draft_spec:
+            # Use refined draft spec
+            spec = self._step_compile_from_draft(ingest_result, refine_result.draft_spec)
+        else:
+            # Normal compilation
+            spec = self._step_compile(ingest_result)
         
         # Step 3: Validate Gates
         gate_result = self._step_validate_gates(spec)
+        
+        # If Gate fails and refiner is available, replace static questions with contextual ones
+        if not gate_result.overall_pass and self.refiner:
+            # Collect all missing fields
+            all_missing_fields = []
+            all_missing_fields.extend(gate_result.gate_s.missing_fields)
+            all_missing_fields.extend(gate_result.gate_t.missing_fields)
+            all_missing_fields.extend(gate_result.gate_v.missing_fields)
+            
+            if all_missing_fields:
+                # Generate contextual questions using refiner
+                refine_context = RefineContext(
+                    round=0,
+                    feature_id=spec.feature.feature_id,
+                )
+                contextual_questions = self.refiner.generate_clarify_questions(
+                    spec, all_missing_fields, refine_context
+                )
+                
+                # Replace static questions with contextual ones
+                if contextual_questions:
+                    gate_result.clarify_questions = contextual_questions
         
         # Update spec status based on gate result
         if gate_result.overall_pass:
@@ -141,6 +190,28 @@ class Orchestrator:
         
         # Step: Validate Gates
         gate_result = self._step_validate_gates(spec)
+        
+        # If Gate fails and refiner is available, replace static questions with contextual ones
+        if not gate_result.overall_pass and self.refiner:
+            # Collect all missing fields
+            all_missing_fields = []
+            all_missing_fields.extend(gate_result.gate_s.missing_fields)
+            all_missing_fields.extend(gate_result.gate_t.missing_fields)
+            all_missing_fields.extend(gate_result.gate_v.missing_fields)
+            
+            if all_missing_fields:
+                # Generate contextual questions using refiner
+                refine_context = RefineContext(
+                    round=0,
+                    feature_id=spec.feature.feature_id,
+                )
+                contextual_questions = self.refiner.generate_clarify_questions(
+                    spec, all_missing_fields, refine_context
+                )
+                
+                # Replace static questions with contextual ones
+                if contextual_questions:
+                    gate_result.clarify_questions = contextual_questions
         
         # Update status
         if gate_result.overall_pass:
@@ -341,6 +412,91 @@ class Orchestrator:
             decisions=[StepDecision(
                 decision="compiled",
                 reason="Spec created from input",
+                next_step="validate_gates",
+            )],
+            meta=StepMeta(llm_model=self.compiler.model),
+        )
+        snapshot.mark_completed()
+        self.snapshot_store.save(snapshot)
+        
+        return spec
+
+    def _step_compile_from_draft(
+        self,
+        ingest_result: Dict[str, Any],
+        draft_spec: Dict[str, Any],
+    ) -> CanonicalSpec:
+        """Execute the compile step using draft spec from refinement."""
+        self._step_seq += 1
+        
+        feature_id = ingest_result.get("feature_id")
+        
+        # If no feature_id, generate one
+        if not feature_id:
+            feature_id = self.spec_store.generate_feature_id()
+        
+        # Create spec from draft_spec
+        from canonical.models.spec import (
+            Feature,
+            Spec,
+            AcceptanceCriteria,
+            Planning,
+            Quality,
+            Decision,
+            Meta,
+        )
+        
+        # Build acceptance criteria
+        acceptance_criteria = []
+        for i, ac_data in enumerate(draft_spec.get("acceptance_criteria", [])):
+            if isinstance(ac_data, dict):
+                ac_id = ac_data.get("id", f"AC-{i+1}")
+                if not ac_id.startswith("AC-"):
+                    ac_id = f"AC-{i+1}"
+                acceptance_criteria.append(AcceptanceCriteria(
+                    id=ac_id,
+                    criteria=ac_data.get("criteria", ""),
+                ))
+            elif isinstance(ac_data, str):
+                acceptance_criteria.append(AcceptanceCriteria(
+                    id=f"AC-{i+1}",
+                    criteria=ac_data,
+                ))
+        
+        # Create spec
+        spec = CanonicalSpec(
+            feature=Feature(
+                feature_id=feature_id,
+                title=draft_spec.get("title", "Untitled"),
+                status=FeatureStatus.DRAFT,
+            ),
+            spec=Spec(
+                goal=draft_spec.get("goal", ""),
+                non_goals=draft_spec.get("non_goals", []),
+                acceptance_criteria=acceptance_criteria,
+            ),
+            planning=Planning(),
+            quality=Quality(),
+            decision=Decision(),
+            meta=Meta(),
+        )
+        
+        # Save to get version
+        spec_version = self.spec_store.save(spec)
+        spec = self.spec_store.load(feature_id, spec_version)
+        
+        # Create snapshot
+        snapshot = StepSnapshot(
+            run_id=self._current_run_id,
+            feature_id=feature_id,
+            spec_version_in=f"S-{datetime.utcnow().strftime('%Y%m%d')}-0000",
+            spec_version_out=spec_version,
+            step=Step(name=StepName.COMPILE, seq=self._step_seq),
+            inputs=StepInput(additional={**ingest_result, "draft_spec": draft_spec}),
+            outputs=StepOutput(spec_version_out=spec_version),
+            decisions=[StepDecision(
+                decision="compiled",
+                reason="Spec created from refined draft",
                 next_step="validate_gates",
             )],
             meta=StepMeta(llm_model=self.compiler.model),

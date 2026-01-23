@@ -12,7 +12,9 @@ from pathlib import Path
 
 from canonical.config import config
 from canonical.models.spec import CanonicalSpec, FeatureStatus
+from canonical.models.refine import RefineResult, RefineContext
 from canonical.engine.orchestrator import Orchestrator
+from canonical.engine.refiner import RequirementRefiner
 from canonical.store.spec_store import SpecStore
 from canonical.services.ai_client import AIClient
 
@@ -38,11 +40,14 @@ orchestrator = Orchestrator(spec_store=spec_store)
 # Initialize AI client for audio transcription (optional)
 ai_client: Optional[AIClient] = None
 
+# Initialize Requirement Refiner (optional, requires LLM config)
+refiner: Optional[RequirementRefiner] = None
+
 
 @app.on_event("startup")
 async def startup():
-    """Initialize AI client on startup if token is configured."""
-    global ai_client
+    """Initialize AI client and refiner on startup if configured."""
+    global ai_client, refiner
     if config.ai_builder_token:
         try:
             ai_client = AIClient(
@@ -52,6 +57,14 @@ async def startup():
         except Exception as e:
             print(f"Warning: Failed to initialize AI client: {e}")
             ai_client = None
+    
+    # Initialize refiner if LLM is configured
+    if config.llm_api_key:
+        try:
+            refiner = RequirementRefiner()
+        except Exception as e:
+            print(f"Warning: Failed to initialize Requirement Refiner: {e}")
+            refiner = None
 
 
 @app.get("/")
@@ -164,11 +177,21 @@ async def run_pipeline(input: dict):
     """Run canonical pipeline"""
     try:
         input_text = input.get("input", "")
+        refine_result_data = input.get("refine_result")
+        
         if not input_text:
             raise HTTPException(status_code=400, detail="Input text is required")
         
+        # Parse refine_result if provided
+        refine_result = None
+        if refine_result_data:
+            try:
+                refine_result = RefineResult.model_validate(refine_result_data)
+            except Exception as e:
+                print(f"Warning: Failed to parse refine_result: {e}")
+        
         # Run the orchestrator pipeline (already saves the spec internally)
-        spec, gate_result = orchestrator.run(input_text)
+        spec, gate_result = orchestrator.run(input_text, refine_result=refine_result)
         
         return {
             "feature_id": spec.feature.feature_id,
@@ -215,6 +238,106 @@ async def answer_feature(feature_id: str, body: dict):
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/refine")
+async def refine_requirement(body: dict):
+    """
+    Refine a requirement using LLM analysis.
+    
+    Request body:
+    {
+        "input": "user input text",
+        "context": {
+            "conversation_history": [...],
+            "round": 0,
+            "feature_id": "...",
+            "additional_context": {}
+        }
+    }
+    """
+    try:
+        if not refiner:
+            raise HTTPException(
+                status_code=503,
+                detail="Requirement Refiner not available. Please configure CANONICAL_LLM_API_KEY."
+            )
+        
+        input_text = body.get("input", "")
+        context_data = body.get("context")
+        
+        if not input_text:
+            raise HTTPException(status_code=400, detail="Input text is required")
+        
+        # Parse context if provided
+        context = None
+        if context_data:
+            try:
+                context = RefineContext.model_validate(context_data)
+            except Exception as e:
+                print(f"Warning: Failed to parse context: {e}")
+                context = None
+        
+        # Refine requirement
+        refine_result = refiner.refine(input_text, context)
+        
+        return refine_result.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/refine/feedback")
+async def refine_feedback(body: dict):
+    """
+    Apply feedback to continue refinement conversation.
+    
+    Request body:
+    {
+        "feedback": "user feedback/answer",
+        "context": {
+            "conversation_history": [...],
+            "round": 1,
+            "feature_id": "...",
+            "additional_context": {}
+        }
+    }
+    """
+    try:
+        if not refiner:
+            raise HTTPException(
+                status_code=503,
+                detail="Requirement Refiner not available. Please configure CANONICAL_LLM_API_KEY."
+            )
+        
+        feedback_text = body.get("feedback", "")
+        context_data = body.get("context")
+        
+        if not feedback_text:
+            raise HTTPException(status_code=400, detail="Feedback text is required")
+        
+        if not context_data:
+            raise HTTPException(status_code=400, detail="Context is required")
+        
+        # Parse context
+        try:
+            context = RefineContext.model_validate(context_data)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid context: {str(e)}")
+        
+        # Apply feedback
+        refine_result = refiner.apply_feedback(feedback_text, context)
+        
+        return refine_result.model_dump()
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

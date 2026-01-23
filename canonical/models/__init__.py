@@ -27,6 +27,11 @@ from canonical.models.snapshot import (
     Evidence,
     EvidenceType,
 )
+from canonical.models.refine import (
+    RefineResult,
+    RefineQuestion,
+    RefineContext,
+)
 
 __all__ = [
     # Spec models
@@ -53,4 +58,8 @@ __all__ = [
     "Step",
     "Evidence",
     "EvidenceType",
+    # Refine models
+    "RefineResult",
+    "RefineQuestion",
+    "RefineContext",
 ]

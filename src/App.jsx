@@ -730,18 +730,130 @@ const FeatureDetailView = ({ featureId, onBack }) => {
   );
 };
 
-// Create Modal Component
+// Create Modal Component with Refinement Support
 const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRecording, isTranscribing, audioLevels, startRecording, stopRecording }) => {
+  const [refineResult, setRefineResult] = useState(null);
+  const [refineContext, setRefineContext] = useState({
+    conversation_history: [],
+    round: 0,
+    feature_id: null,
+    additional_context: {}
+  });
+  const [refineLoading, setRefineLoading] = useState(false);
+  const [refineAnswers, setRefineAnswers] = useState({});
+
   if (!isOpen) return null;
+
+  const handleRefine = async () => {
+    if (!input.trim()) return;
+    setRefineLoading(true);
+    try {
+      const res = await fetch('/api/v1/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: input,
+          context: refineContext
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRefineResult(data);
+        // Update context with new conversation history
+        setRefineContext(prev => ({
+          ...prev,
+          conversation_history: [
+            ...prev.conversation_history,
+            { role: 'user', content: input },
+            { role: 'assistant', content: JSON.stringify(data) }
+          ],
+          round: data.round || prev.round + 1
+        }));
+      } else {
+        const error = await res.json();
+        alert(`需求分析失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to refine requirement:', err);
+      alert('需求分析失败，请重试');
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const handleRefineFeedback = async (feedback) => {
+    setRefineLoading(true);
+    try {
+      const res = await fetch('/api/v1/refine/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback: feedback,
+          context: refineContext
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRefineResult(data);
+        setRefineContext(prev => ({
+          ...prev,
+          conversation_history: [
+            ...prev.conversation_history,
+            { role: 'user', content: feedback },
+            { role: 'assistant', content: JSON.stringify(data) }
+          ],
+          round: data.round || prev.round + 1
+        }));
+      } else {
+        const error = await res.json();
+        alert(`反馈处理失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to apply feedback:', err);
+      alert('反馈处理失败，请重试');
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const handleSubmitRefined = async () => {
+    if (!refineResult || !refineResult.ready_to_compile) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/v1/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: input,
+          refine_result: refineResult
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.feature_id) {
+          onSubmit(); // This will trigger parent's onSubmit which handles navigation
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create feature:', err);
+      alert('创建功能失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit();
+    if (refineResult && refineResult.ready_to_compile) {
+      handleSubmitRefined();
+    } else {
+      handleRefine();
+    }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}>
         <div className="modal-header">
           <h2>创建新功能</h2>
           <button className="btn-close" onClick={onClose}>
@@ -774,9 +886,9 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="描述你想实现的功能，例如：添加用户登录功能，支持用户名密码登录和手机验证码登录"
+                placeholder="描述你想实现的功能，例如：我想做一个健身网站"
                 rows={6}
-                disabled={loading || isRecording}
+                disabled={loading || isRecording || refineLoading}
                 style={{ paddingLeft: isRecording ? '240px' : '12px', paddingRight: '80px' }}
               />
               <div style={{ position: 'absolute', right: '12px', bottom: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -798,7 +910,7 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
                       startRecording();
                     }
                   }}
-                  disabled={loading || isTranscribing}
+                  disabled={loading || isTranscribing || refineLoading}
                   style={{ position: 'static' }}
                 >
                   {isRecording ? <Square size={24} /> : isTranscribing ? <div className="loader" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <Mic size={20} />}
@@ -806,12 +918,106 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
               </div>
             </div>
           </div>
+
+          {/* Refinement Result Display */}
+          {refineResult && (
+            <div style={{ marginTop: '20px', padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              {/* Understanding Summary */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
+                  <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                  AI 需求理解
+                </div>
+                <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
+                  <ReactMarkdown>{refineResult.understanding_summary}</ReactMarkdown>
+                </div>
+              </div>
+
+              {/* Inferred Assumptions */}
+              {refineResult.inferred_assumptions && refineResult.inferred_assumptions.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
+                    推断的假设
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#aaa' }}>
+                    {refineResult.inferred_assumptions.map((assumption, i) => (
+                      <li key={i}>{assumption}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Questions */}
+              {refineResult.questions && refineResult.questions.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '12px', fontWeight: 600 }}>
+                    <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                    需要澄清的问题 ({refineResult.questions.length})
+                  </div>
+                  {refineResult.questions.map((q, i) => (
+                    <div key={q.id || i} style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>
+                        {q.question}
+                      </div>
+                      {q.why_asking && (
+                        <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '8px' }}>
+                          为什么需要：{q.why_asking}
+                        </div>
+                      )}
+                      {q.suggestions && q.suggestions.length > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '8px' }}>
+                          建议：{q.suggestions.join('、')}
+                        </div>
+                      )}
+                      <textarea
+                        value={refineAnswers[q.id] || ''}
+                        onChange={(e) => setRefineAnswers({...refineAnswers, [q.id]: e.target.value})}
+                        placeholder="请输入你的回答..."
+                        rows={2}
+                        disabled={refineLoading || loading}
+                        style={{ width: '100%', padding: '8px', fontSize: '0.85rem', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ready to Compile Indicator */}
+              {refineResult.ready_to_compile && (
+                <div style={{ padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', marginTop: '16px' }}>
+                  <div style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 500 }}>
+                    <CheckCircle2 size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                    需求已足够清晰，可以开始创建功能
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="modal-actions">
-            <button type="button" onClick={onClose} disabled={loading}>
+            <button type="button" onClick={onClose} disabled={loading || refineLoading}>
               取消
             </button>
-            <button type="submit" className="btn-primary" disabled={loading || !input.trim()}>
-              {loading ? '创建中...' : '开始分析'}
+            {refineResult && !refineResult.ready_to_compile && refineResult.questions && refineResult.questions.length > 0 && (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={refineLoading || Object.keys(refineAnswers).length === 0}
+                onClick={async () => {
+                  // Collect answers
+                  const feedback = refineResult.questions.map(q => {
+                    const answer = refineAnswers[q.id] || '';
+                    return `${q.question}\n${answer}`;
+                  }).join('\n\n');
+                  await handleRefineFeedback(feedback);
+                  setRefineAnswers({});
+                }}
+              >
+                {refineLoading ? '分析中...' : '提交回答并继续细化'}
+              </button>
+            )}
+            <button type="submit" className="btn-primary" disabled={loading || refineLoading || !input.trim()}>
+              {loading ? '创建中...' : refineResult && refineResult.ready_to_compile ? '创建功能' : '开始分析'}
             </button>
           </div>
         </form>
