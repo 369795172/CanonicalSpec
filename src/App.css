@@ -266,6 +266,78 @@ header {
   font-size: 1rem;
 }
 
+/* History Minimized State */
+.history-minimized {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px;
+  min-height: 400px;
+  gap: 30px;
+}
+
+.welcome-section {
+  text-align: center;
+}
+
+.welcome-section h2 {
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin-bottom: 10px;
+  color: var(--text-main);
+}
+
+.welcome-section p {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.btn-history-toggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 14px 28px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-history-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+  color: var(--text-main);
+}
+
+/* History Expanded State */
+.history-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.btn-history-collapse {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  padding: 8px 0;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.btn-history-collapse:hover {
+  color: var(--text-main);
+}
+
 /* Features List */
 .features-list {
   display: flex;

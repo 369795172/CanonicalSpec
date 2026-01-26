@@ -9,6 +9,7 @@ This module implements intelligent requirement analysis using LLM to:
 
 import json
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 from openai import OpenAI
 
 from canonical.models.refine import (
@@ -19,6 +20,20 @@ from canonical.models.refine import (
 from canonical.models.spec import CanonicalSpec, MissingField
 from canonical.models.gate import ClarifyQuestion
 from canonical.config import config
+
+# Import Genome models
+try:
+    from canonical.models.genome import (
+        RequirementGenome,
+        GenomeChanges,
+        GenomeSnapshot,
+        Assumption,
+    )
+except ImportError:
+    RequirementGenome = None
+    GenomeChanges = None
+    GenomeSnapshot = None
+    Assumption = None
 
 
 class RequirementRefiner:
@@ -187,13 +202,79 @@ class RequirementRefiner:
                     suggestions=q_data.get("suggestions", []),
                 ))
         
+        # Build Genome if available
+        genome = None
+        changes = None
+        new_round = context.round + 1
+        
+        if RequirementGenome and GenomeChanges:
+            # Get existing genome from context
+            existing_genome = None
+            if context.additional_context and context.additional_context.get('genome'):
+                try:
+                    existing_genome = RequirementGenome.model_validate(context.additional_context['genome'])
+                except Exception:
+                    pass
+            
+            # Create new genome
+            genome = RequirementGenome(
+                genome_version=f"G-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                round=new_round,
+                summary=data.get("understanding_summary", ""),
+                created_at=existing_genome.created_at if existing_genome else datetime.now(),
+                updated_at=datetime.now(),
+            )
+            
+            # Copy existing data
+            if existing_genome:
+                genome.goals = existing_genome.goals
+                genome.non_goals = existing_genome.non_goals
+                genome.assumptions = existing_genome.assumptions.copy()
+                genome.constraints = existing_genome.constraints
+                genome.user_stories = existing_genome.user_stories
+                genome.decisions = existing_genome.decisions
+                genome.history = existing_genome.history.copy()
+            
+            # Add new assumptions from inferred_assumptions
+            changes = GenomeChanges()
+            for assumption_text in data.get("inferred_assumptions", []):
+                if assumption_text and not any(a.content == assumption_text for a in genome.assumptions):
+                    genome.assumptions.append(Assumption(
+                        id=f"A-{len(genome.assumptions) + 1}",
+                        content=assumption_text,
+                        source_round=new_round,
+                        confirmed=False,
+                    ))
+                    changes.new_assumptions.append(assumption_text)
+            
+            # Update open questions
+            genome.open_questions = [q.model_dump() for q in questions]
+            genome.ready_to_compile = data.get("ready_to_compile", False)
+            
+            # Create snapshot
+            if GenomeSnapshot:
+                snapshot = GenomeSnapshot(
+                    round=new_round,
+                    genome_version=genome.genome_version,
+                    summary=genome.summary,
+                    assumptions_count=len(genome.assumptions),
+                    constraints_count=len(genome.constraints),
+                    user_stories_count=len(genome.user_stories),
+                    questions_asked=[q.question for q in questions],
+                    user_answers=[],
+                    timestamp=datetime.now(),
+                )
+                genome.history.append(snapshot)
+        
         return RefineResult(
-            round=context.round + 1,
+            round=new_round,
             understanding_summary=data.get("understanding_summary", ""),
             inferred_assumptions=data.get("inferred_assumptions", []),
             questions=questions,
             ready_to_compile=data.get("ready_to_compile", False),
             draft_spec=data.get("draft_spec"),
+            genome=genome,
+            changes=changes,
         )
 
     def apply_feedback(

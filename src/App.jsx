@@ -16,6 +16,8 @@ import {
   Square,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import GenomeStatus from './components/GenomeStatus';
+import GenomeChanges from './components/GenomeChanges';
 
 const App = () => {
   const [features, setFeatures] = useState(() => {
@@ -27,6 +29,7 @@ const App = () => {
   const [newFeatureInput, setNewFeatureInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'create', 'view'
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false); // History list collapsed by default
   
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -268,16 +271,38 @@ const App = () => {
 
       <div className="main-content">
         <div className="discovery-pane">
-          {activeTab === 'list' && (
-            <div className="features-list">
-              {features.length === 0 ? (
-                <div className="empty-state">
-                  <FileText size={48} style={{ marginBottom: '20px', opacity: 0.3 }} />
-                  <h2>暂无功能</h2>
-                  <p>点击"创建功能"开始创建新的 Canonical Spec。</p>
-                </div>
-              ) : (
-                features.map((feature, index) => {
+          {/* History minimized by default - show only toggle button */}
+          {activeTab === 'list' && !isHistoryExpanded && (
+            <div className="history-minimized">
+              <div className="welcome-section">
+                <Sparkles size={48} style={{ marginBottom: '20px', color: 'var(--accent)' }} />
+                <h2>欢迎使用 Canonical Spec</h2>
+                <p>点击"创建功能"开始创建新的需求规范</p>
+              </div>
+              {features.length > 0 && (
+                <button 
+                  className="btn-history-toggle"
+                  onClick={() => setIsHistoryExpanded(true)}
+                >
+                  <History size={16} />
+                  查看历史功能 ({features.length})
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* History expanded - show full list */}
+          {activeTab === 'list' && isHistoryExpanded && (
+            <div className="history-expanded">
+              <button 
+                className="btn-history-collapse"
+                onClick={() => setIsHistoryExpanded(false)}
+              >
+                <ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} />
+                收起历史
+              </button>
+              <div className="features-list">
+                {features.map((feature, index) => {
                   const statusColors = {
                     draft: '#888',
                     clarifying: '#f59e0b',
@@ -318,8 +343,8 @@ const App = () => {
                       )}
                     </div>
                   );
-                })
-              )}
+                })}
+              </div>
             </div>
           )}
 
@@ -741,6 +766,7 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
   });
   const [refineLoading, setRefineLoading] = useState(false);
   const [refineAnswers, setRefineAnswers] = useState({});
+  const [currentView, setCurrentView] = useState('current'); // 'current' or history index
 
   if (!isOpen) return null;
 
@@ -759,7 +785,7 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
       if (res.ok) {
         const data = await res.json();
         setRefineResult(data);
-        // Update context with new conversation history
+        // Update context with new conversation history and genome
         setRefineContext(prev => ({
           ...prev,
           conversation_history: [
@@ -767,7 +793,11 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
             { role: 'user', content: input },
             { role: 'assistant', content: JSON.stringify(data) }
           ],
-          round: data.round || prev.round + 1
+          round: data.round || prev.round + 1,
+          additional_context: {
+            ...prev.additional_context,
+            genome: data.genome || prev.additional_context?.genome
+          }
         }));
       } else {
         const error = await res.json();
@@ -802,15 +832,22 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
             { role: 'user', content: feedback },
             { role: 'assistant', content: JSON.stringify(data) }
           ],
-          round: data.round || prev.round + 1
+          round: data.round || prev.round + 1,
+          additional_context: {
+            ...prev.additional_context,
+            genome: data.genome || prev.additional_context?.genome
+          }
         }));
+        return true;
       } else {
         const error = await res.json();
         alert(`反馈处理失败: ${error.detail || '未知错误'}`);
+        return false;
       }
     } catch (err) {
       console.error('Failed to apply feedback:', err);
       alert('反馈处理失败，请重试');
+      return false;
     } finally {
       setRefineLoading(false);
     }
@@ -920,41 +957,69 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
           </div>
 
           {/* Refinement Result Display */}
-          {refineResult && (
-            <div style={{ marginTop: '20px', padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-              {/* Understanding Summary */}
-              <div style={{ marginBottom: '20px' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
-                  <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
-                  AI 需求理解
+          {refineResult && (() => {
+            // Determine which data to display based on currentView
+            let displayData = refineResult;
+            
+            if (currentView !== 'current' && refineResult.genome?.history) {
+              const historyIndex = parseInt(currentView);
+              const history = refineResult.genome.history.slice().reverse();
+              if (history[historyIndex]) {
+                const snapshot = history[historyIndex];
+                // Create a display result from snapshot
+                displayData = {
+                  ...refineResult,
+                  understanding_summary: snapshot.summary,
+                  round: snapshot.round,
+                };
+              }
+            }
+            
+            return (
+            <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
+              {/* Main Content Area */}
+              <div style={{ flex: '1', padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                {/* Changes Highlight (only show for current view) */}
+                {currentView === 'current' && refineResult.changes && <GenomeChanges changes={refineResult.changes} />}
+                
+                {/* Understanding Summary */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>
+                      <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                      AI 需求理解
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: '#888', fontWeight: 400 }}>
+                      第 {displayData.round} 轮
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
+                    <ReactMarkdown>{displayData.understanding_summary}</ReactMarkdown>
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
-                  <ReactMarkdown>{refineResult.understanding_summary}</ReactMarkdown>
-                </div>
-              </div>
 
-              {/* Inferred Assumptions */}
-              {refineResult.inferred_assumptions && refineResult.inferred_assumptions.length > 0 && (
+              {/* Inferred Assumptions (only show for current view) */}
+              {currentView === 'current' && displayData.inferred_assumptions && displayData.inferred_assumptions.length > 0 && (
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
                     推断的假设
                   </div>
                   <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#aaa' }}>
-                    {refineResult.inferred_assumptions.map((assumption, i) => (
+                    {displayData.inferred_assumptions.map((assumption, i) => (
                       <li key={i}>{assumption}</li>
                     ))}
                   </ul>
                 </div>
               )}
 
-              {/* Questions */}
-              {refineResult.questions && refineResult.questions.length > 0 && (
+              {/* Questions (only show for current view) */}
+              {currentView === 'current' && displayData.questions && displayData.questions.length > 0 && (
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '12px', fontWeight: 600 }}>
                     <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
-                    需要澄清的问题 ({refineResult.questions.length})
+                    需要澄清的问题 ({displayData.questions.length})
                   </div>
-                  {refineResult.questions.map((q, i) => (
+                  {displayData.questions.map((q, i) => (
                     <div key={q.id || i} style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
                       <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>
                         {q.question}
@@ -982,8 +1047,8 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
                 </div>
               )}
 
-              {/* Ready to Compile Indicator */}
-              {refineResult.ready_to_compile && (
+              {/* Ready to Compile Indicator (only show for current view) */}
+              {currentView === 'current' && displayData.ready_to_compile && (
                 <div style={{ padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', marginTop: '16px' }}>
                   <div style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 500 }}>
                     <CheckCircle2 size={14} style={{ marginRight: '6px', display: 'inline' }} />
@@ -991,8 +1056,21 @@ const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRe
                   </div>
                 </div>
               )}
+              </div>
+              
+              {/* Sidebar - Genome Status */}
+              {refineResult.genome && (
+                <div style={{ width: '280px', flexShrink: 0 }}>
+                  <GenomeStatus 
+                    genome={refineResult.genome} 
+                    currentView={currentView}
+                    onViewChange={setCurrentView}
+                  />
+                </div>
+              )}
             </div>
-          )}
+            );
+          })()}
 
           <div className="modal-actions">
             <button type="button" onClick={onClose} disabled={loading || refineLoading}>
