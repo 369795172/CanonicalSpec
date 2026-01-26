@@ -7,6 +7,7 @@
 - **单一入口**：Tooling-first（CLI/命令式工具），嵌入现有工具链（如 `feishu-onboarding-tool`），暂不支持 Web UI/独立 API 服务
 - **核心流程**：输入 → 编译 → Gate 判定 → CLI 人工确认 → 发布到 Feishu
 - **Gate 策略**：硬必填通过 + CLI 人工确认（score 仅用于辅助决策）
+- **前端体验约束**：历史需求列表默认折叠，当前需求创建/细化为主视图（历史列表仅通过“查看历史”展开）
 
 ### 明确不做什么（Out-of-Scope）
 - ❌ 不支持 Jira/GitHub Issues/Notion 等其他执行系统（未来扩展）

@@ -47,6 +47,10 @@ flowchart LR
 | `manual_review` | `spec_version_in` + `gate_result` | `review_decision`（go/hold/drop） | 人工确认（CLI/工具） | 等待人工输入；**不修改 Spec，不生成新版本** |
 | `publish` | `spec_version_in` + `review_decision=go` | `publish_result`（external_id） | Feishu Publisher | 返回错误，记录到 Ledger；**不修改 Spec，不生成新版本**；幂等键：`feature_id + target + spec_version` |
 
+## Clarify Loop 体验约束（核心体验）
+1. **历史记录默认折叠**：澄清页面主区域默认聚焦当前需求与问题列表，历史列表仅通过“查看历史”入口展开。
+2. **当前需求为主**：细化流程中的当前轮内容必须保持主视觉区域优先级，避免历史内容占据主要空间。
+
 ## Step Snapshot 结构（证据链）
 
 ### Snapshot JSON Schema
