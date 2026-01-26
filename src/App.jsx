@@ -187,7 +187,7 @@ const App = () => {
       const formData = new FormData();
       formData.append('audio_file', audioBlob, 'recording.webm');
       
-      const response = await fetch('/api/transcribe', {
+      const response = await fetch('/api/v1/transcribe', {
         method: 'POST',
         body: formData
       });

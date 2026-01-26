@@ -35,7 +35,7 @@ npm run dev
 - **List Features**: `GET /api/v1/features`
 - **Get Feature**: `GET /api/v1/features/{feature_id}`
 - **Create Feature**: `POST /api/v1/run`
-- **Transcribe Audio**: `POST /api/transcribe`
+- **Transcribe Audio**: `POST /api/v1/transcribe`
 
 ## API Documentation
 
@@ -55,7 +55,7 @@ Make sure your `.env` file contains:
 
 ## Voice Transcription
 
-The `/api/transcribe` endpoint uses AI Builder Space API for audio transcription. To enable voice transcription:
+The `/api/v1/transcribe` endpoint uses AI Builder Space API for audio transcription. To enable voice transcription:
 
 1. Get your AI Builder Space API token
 2. Add the token to `.env`:

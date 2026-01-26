@@ -344,7 +344,7 @@ async def refine_feedback(body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/transcribe")
+@app.post("/api/v1/transcribe")
 async def transcribe_audio(audio_file: UploadFile = File(...)):
     """
     Transcribe audio to text using AI Builder Space API.
