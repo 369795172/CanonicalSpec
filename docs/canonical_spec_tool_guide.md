@@ -52,7 +52,15 @@ Example input:
 - AC-2: 解锁时间修复后与规则一致。
 ```
 
-### 2) Run the pipeline
+### 2) Create and activate a virtual environment (required)
+```
+cd /Users/marvi/AndroidStudioProjects/canonical_frontend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3) Run the pipeline
 ```
 cd /Users/marvi/AndroidStudioProjects/canonical_frontend
 source venv/bin/activate
@@ -64,7 +72,7 @@ python -m canonical.cli review F-2026-001 --decision go
 python -m canonical.cli publish F-2026-001
 ```
 
-### 3) If Gate S/T/V fails, answer missing fields
+### 4) If Gate S/T/V fails, answer missing fields
 ```
 python -m canonical.cli answer F-2026-001 --answer "spec.background=补充背景信息"
 python -m canonical.cli answer F-2026-001 --answer "spec.acceptance_criteria=[...]"
