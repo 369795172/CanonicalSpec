@@ -1,7 +1,7 @@
 #!/bin/bash
 # Restart Canonical Backend API Server
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # 停止可能正在运行的后端服务
 echo "Checking for running backend service..."

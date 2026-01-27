@@ -27,6 +27,14 @@ canonical_spec/
 │       ├── 04_feishu_publish_contract.md
 │       ├── 05_review_checklist.md
 │       └── 06_mvp_integration_matrix.md
+├── src/                     # React 前端代码
+│   ├── App.jsx              # 主应用组件
+│   ├── main.jsx             # 入口文件
+│   └── components/          # UI 组件
+├── scripts/                 # 辅助脚本
+│   ├── restart_backend.sh   # 重启后端服务
+│   ├── restart_frontend.sh  # 重启前端服务
+│   └── start_api.sh         # 启动 API 服务
 └── canonical/               # Python 实现代码
     ├── cli.py              # CLI 命令入口
     ├── config.py           # 配置管理

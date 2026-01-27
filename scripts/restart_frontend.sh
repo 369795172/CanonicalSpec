@@ -1,7 +1,7 @@
 #!/bin/bash
 # Restart Canonical Frontend Dev Server
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # 停止可能正在运行的前端服务
 echo "Checking for running frontend service..."
