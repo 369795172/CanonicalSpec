@@ -47,6 +47,27 @@ flowchart LR
 | `manual_review` | `spec_version_in` + `gate_result` | `review_decision`（go/hold/drop） | 人工确认（CLI/工具） | 等待人工输入；**不修改 Spec，不生成新版本** |
 | `publish` | `spec_version_in` + `review_decision=go` | `publish_result`（external_id） | Feishu Publisher | 返回错误，记录到 Ledger；**不修改 Spec，不生成新版本**；幂等键：`feature_id + target + spec_version` |
 
+## User Journey Mapping（简版）
+
+### 场景A：从0到1（模糊输入）
+
+1. **ingest**：输入碎片化文本/对话 → 结构化 ingest_result
+2. **compile**：生成 draft spec_version
+3. **validate_gates**：Gate fail → clarify_questions
+4. **apply_answers**：用户补答 → 新 spec_version（如未通过，循环回 compile）
+5. **plan_tasks + generate_vv**：补齐可执行最小任务集与验证项
+6. **manual_review**：人工决策 go/hold/drop
+7. **publish**：go 时发布到 Feishu（产生 external_id）
+
+### 场景B：已有项目背景（输入较完整）
+
+1. **ingest**：输入完整文档 + 可选 repo context
+2. **compile**：生成较完整 spec_version
+3. **validate_gates**：多为 pass（如需，仅触发轻量澄清）
+4. **plan_tasks**：拆出最小可执行任务集
+5. **generate_vv**：为每个任务补齐验证项
+6. **manual_review → publish**：go 则发布；hold/drop 记录原因
+
 ## Clarify Loop 体验约束（核心体验）
 1. **历史记录默认折叠**：澄清页面主区域默认聚焦当前需求与问题列表，历史列表仅通过“查看历史”入口展开。
 2. **当前需求为主**：细化流程中的当前轮内容必须保持主视觉区域优先级，避免历史内容占据主要空间。
