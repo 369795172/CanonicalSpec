@@ -34,6 +34,10 @@ body {
   padding: 0 40px;
 }
 
+.app-container--has-banner {
+  padding-top: 60px;
+}
+
 /* Header */
 header {
   display: flex;
@@ -628,6 +632,14 @@ button:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Disabled state for textareas */
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.02) !important;
 }
 
 .btn-create,

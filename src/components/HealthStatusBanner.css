@@ -1,0 +1,113 @@
+.health-status-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 12px 20px;
+  background: rgba(239, 68, 68, 0.95);
+  border-bottom: 2px solid rgba(220, 38, 38, 0.8);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: slideDown 0.3s ease-out;
+}
+
+.health-status-banner--error {
+  background: rgba(239, 68, 68, 0.95);
+  border-bottom-color: rgba(220, 38, 38, 0.8);
+}
+
+.health-status-banner--warning {
+  background: rgba(245, 158, 11, 0.95);
+  border-bottom-color: rgba(217, 119, 6, 0.8);
+}
+
+.health-status-banner--success {
+  background: rgba(16, 185, 129, 0.95);
+  border-bottom-color: rgba(5, 150, 105, 0.8);
+}
+
+.health-status-banner__content {
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.health-status-banner__icon {
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.health-status-banner__message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #fff;
+}
+
+.health-status-banner__message strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.health-status-banner__message span {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.health-status-banner__retry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.health-status-banner__retry:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.health-status-banner__retry:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.health-status-banner__retry .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 当横幅显示时，为应用内容添加顶部padding */
+.app-container--has-banner {
+  padding-top: 60px;
+}

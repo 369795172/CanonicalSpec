@@ -18,17 +18,26 @@ import {
 import ReactMarkdown from 'react-markdown';
 import GenomeStatus from './components/GenomeStatus';
 import GenomeChanges from './components/GenomeChanges';
+import HealthStatusBanner from './components/HealthStatusBanner';
+import { useHealth } from './contexts/HealthContext';
 
 const App = () => {
+  const { isHealthy } = useHealth();
   const [features, setFeatures] = useState(() => {
     const saved = localStorage.getItem('canonical_features');
     return saved ? JSON.parse(saved) : [];
   });
   const [currentFeature, setCurrentFeature] = useState(null);
-  const [newFeatureInput, setNewFeatureInput] = useState('');
+  const [newFeatureInput, setNewFeatureInput] = useState(() => {
+    const saved = localStorage.getItem('canonical_draft_input');
+    return saved || '';
+  });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'create', 'view'
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false); // History list collapsed by default
+  
+  // 当后端不健康时，禁用所有操作
+  const isDisabled = isHealthy === false;
   
   // Clarification mode state
   const [clarifyingMode, setClarifyingMode] = useState(false);
@@ -59,6 +68,15 @@ const App = () => {
     fetchFeatures();
   }, []);
 
+  // 自动保存输入到 localStorage
+  useEffect(() => {
+    if (newFeatureInput.trim()) {
+      localStorage.setItem('canonical_draft_input', newFeatureInput);
+    } else {
+      localStorage.removeItem('canonical_draft_input');
+    }
+  }, [newFeatureInput]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -75,6 +93,11 @@ const App = () => {
   }, []);
 
   const fetchFeatures = async () => {
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      return;
+    }
+    
     try {
       const res = await fetch('/api/v1/features', {
         method: 'GET',
@@ -195,6 +218,12 @@ const App = () => {
   };
   
   const transcribeAudio = async (audioBlob) => {
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法进行语音转文字');
+      return;
+    }
+    
     setIsTranscribing(true);
     try {
       const formData = new FormData();
@@ -223,6 +252,13 @@ const App = () => {
 
   const handleCreateFeature = async () => {
     if (!newFeatureInput.trim()) return;
+    
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法创建功能');
+      return;
+    }
+    
     setLoading(true);
     try {
       const res = await fetch('/api/v1/run', {
@@ -242,6 +278,7 @@ const App = () => {
           setActiveTab('view');
           setShowCreateModal(false);
           setNewFeatureInput('');
+          localStorage.removeItem('canonical_draft_input');
         }
       }
     } catch (err) {
@@ -256,6 +293,13 @@ const App = () => {
   const handleRefine = async () => {
     // For existing features, allow empty input (will load from spec)
     if (!clarifyingFeatureId && !newFeatureInput.trim()) return;
+    
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法进行需求分析');
+      return;
+    }
+    
     setRefineLoading(true);
     try {
       const endpoint = clarifyingFeatureId 
@@ -303,6 +347,12 @@ const App = () => {
   };
 
   const handleRefineFeedback = async (feedback) => {
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法处理反馈');
+      return false;
+    }
+    
     setRefineLoading(true);
     try {
       const res = await fetch('/api/v1/refine/feedback', {
@@ -332,8 +382,15 @@ const App = () => {
         }));
         return true;
       } else {
-        const error = await res.json();
-        alert(`反馈处理失败: ${error.detail || '未知错误'}`);
+        // 尝试解析错误信息
+        let errorMessage = '未知错误';
+        try {
+          const error = await res.json();
+          errorMessage = error.detail || error.message || `HTTP ${res.status}`;
+        } catch (e) {
+          errorMessage = `HTTP ${res.status}: ${res.statusText}`;
+        }
+        alert(`反馈处理失败: ${errorMessage}`);
         return false;
       }
     } catch (err) {
@@ -347,6 +404,13 @@ const App = () => {
 
   const handleSubmitRefined = async () => {
     if (!refineResult || !refineResult.ready_to_compile) return;
+    
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法创建功能');
+      return;
+    }
+    
     setLoading(true);
     try {
       const endpoint = clarifyingFeatureId
@@ -379,6 +443,7 @@ const App = () => {
           });
           setRefineAnswers({});
           setNewFeatureInput('');
+          localStorage.removeItem('canonical_draft_input');
           
           // Navigate to feature view
           setCurrentFeature(data.feature_id);
@@ -438,7 +503,8 @@ const App = () => {
     : null;
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${isHealthy === false ? 'app-container--has-banner' : ''}`}>
+      <HealthStatusBanner />
       <header>
         <div className="logo">
           Canonical Spec <span>Manager</span>
@@ -447,6 +513,7 @@ const App = () => {
           <button
             className="btn-create"
             onClick={() => handleStartClarification(null)}
+            disabled={isDisabled}
           >
             <Sparkles size={16} style={{ marginRight: '8px' }} />
             创建功能
@@ -513,7 +580,7 @@ const App = () => {
                     onChange={(e) => setNewFeatureInput(e.target.value)}
                     placeholder="描述你想实现的功能，例如：我想做一个健身网站"
                     rows={6}
-                    disabled={loading || isRecording || refineLoading}
+                    disabled={loading || isRecording || refineLoading || isDisabled}
                     style={{ 
                       width: '100%', 
                       paddingLeft: isRecording ? '240px' : '12px', 
@@ -547,7 +614,7 @@ const App = () => {
                           startRecording();
                         }
                       }}
-                      disabled={loading || isTranscribing || refineLoading}
+                      disabled={loading || isTranscribing || refineLoading || isDisabled}
                       style={{ position: 'static' }}
                     >
                       {isRecording ? <Square size={24} /> : isTranscribing ? <div className="loader" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <Mic size={20} />}
@@ -638,7 +705,7 @@ const App = () => {
                                 onChange={(e) => setRefineAnswers({...refineAnswers, [q.id]: e.target.value})}
                                 placeholder="请输入你的回答..."
                                 rows={2}
-                                disabled={refineLoading || loading}
+                                disabled={refineLoading || loading || isDisabled}
                                 style={{ width: '100%', padding: '8px', fontSize: '0.85rem', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
                               />
                             </div>
@@ -675,7 +742,7 @@ const App = () => {
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px', paddingTop: '20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
                 <button 
                   onClick={handleCancelClarification} 
-                  disabled={loading || refineLoading}
+                  disabled={loading || refineLoading || isDisabled}
                   style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', cursor: 'pointer' }}
                 >
                   取消
@@ -687,10 +754,21 @@ const App = () => {
                         const answer = refineAnswers[q.id] || '';
                         return `${q.question}\n${answer}`;
                       }).join('\n\n');
-                      await handleRefineFeedback(feedback);
-                      setRefineAnswers({});
+                      
+                      // 检查是否有空答案
+                      const hasEmptyAnswers = refineResult.questions.some(q => !refineAnswers[q.id] || refineAnswers[q.id].trim() === '');
+                      if (hasEmptyAnswers) {
+                        alert('请填写所有问题的答案');
+                        return;
+                      }
+                      
+                      const success = await handleRefineFeedback(feedback);
+                      // 只在成功时才清空答案，失败时保留用户输入
+                      if (success) {
+                        setRefineAnswers({});
+                      }
                     }}
-                    disabled={refineLoading || Object.keys(refineAnswers).length === 0}
+                    disabled={refineLoading || Object.keys(refineAnswers).length === 0 || isDisabled}
                     style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
                   >
                     {refineLoading ? '分析中...' : '提交回答并继续细化'}
@@ -705,7 +783,7 @@ const App = () => {
                       handleRefine();
                     }
                   }}
-                  disabled={loading || refineLoading || (!clarifyingFeatureId && !newFeatureInput.trim())}
+                  disabled={loading || refineLoading || (!clarifyingFeatureId && !newFeatureInput.trim()) || isDisabled}
                   style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
                 >
                   {loading ? '创建中...' : refineResult && refineResult.ready_to_compile ? '创建功能' : '开始分析'}
@@ -823,6 +901,7 @@ const App = () => {
               <button
                 className={activeTab === 'create' ? 'active' : ''}
                 onClick={() => handleStartClarification(null)}
+                disabled={isDisabled}
                 style={{ width: '100%', justifyContent: 'flex-start' }}
               >
                 <Sparkles size={16} /> 创建功能
@@ -868,7 +947,7 @@ const App = () => {
             placeholder="描述你想实现的功能，或点击麦克风按钮进行语音输入..."
             value={newFeatureInput}
             onChange={(e) => setNewFeatureInput(e.target.value)}
-            disabled={loading || isRecording || clarifyingMode}
+            disabled={loading || isRecording || clarifyingMode || isDisabled}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !loading && !isRecording && !clarifyingMode && newFeatureInput.trim()) {
                 e.preventDefault();
@@ -886,7 +965,7 @@ const App = () => {
             <button
               className={`btn-voice ${isRecording ? 'recording' : ''} ${isTranscribing ? 'transcribing' : ''}`}
               onClick={isRecording ? stopRecording : startRecording}
-              disabled={loading || isTranscribing}
+              disabled={loading || isTranscribing || isDisabled}
               title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing..." : "Start voice input"}
             >
               {isRecording ? <Square size={24} /> : isTranscribing ? <div className="loader" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <Mic size={20} />}
@@ -906,7 +985,7 @@ const App = () => {
               handleStartClarification(null);
             }
           }}
-          disabled={(loading || isRecording || refineLoading) || (!clarifyingMode && !newFeatureInput.trim()) || (clarifyingMode && !newFeatureInput.trim() && !refineResult)}
+          disabled={(loading || isRecording || refineLoading) || (!clarifyingMode && !newFeatureInput.trim()) || (clarifyingMode && !newFeatureInput.trim() && !refineResult) || isDisabled}
         >
           {(loading || refineLoading) ? <div className="loader" style={{ width: 24, height: 24, borderWidth: 2 }} /> : <Sparkles size={32} />}
         </button>
@@ -930,6 +1009,9 @@ const App = () => {
 
 // Clarification Panel Component (kept for FeatureDetailView compatibility)
 const ClarificationPanel = ({ questions, answers, setAnswers, onSubmit, isSubmitting }) => {
+  const { isHealthy } = useHealth();
+  const isDisabled = isHealthy === false;
+  
   if (!questions || questions.length === 0) return null;
 
   return (
@@ -947,12 +1029,13 @@ const ClarificationPanel = ({ questions, answers, setAnswers, onSubmit, isSubmit
             onChange={(e) => setAnswers({...answers, [q.field_path]: e.target.value})}
             placeholder="请输入..."
             rows={3}
+            disabled={isDisabled}
           />
         </div>
       ))}
       <button 
         onClick={onSubmit} 
-        disabled={isSubmitting || Object.keys(answers).length === 0}
+        disabled={isSubmitting || Object.keys(answers).length === 0 || isDisabled}
         className="btn-primary"
         style={{ marginTop: '16px', width: '100%' }}
       >
@@ -964,15 +1047,19 @@ const ClarificationPanel = ({ questions, answers, setAnswers, onSubmit, isSubmit
 
 // Feature Detail View Component
 const FeatureDetailView = ({ featureId, onBack }) => {
+  const { isHealthy } = useHealth();
   const [featureData, setFeatureData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [clarifyQuestions, setClarifyQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // 当后端不健康时，禁用所有操作
+  const isDisabled = isHealthy === false;
 
   useEffect(() => {
     fetchFeatureDetails();
-  }, [featureId]);
+  }, [featureId, isHealthy]);
 
   useEffect(() => {
     if (featureData?.gate_result?.clarify_questions) {
@@ -984,6 +1071,12 @@ const FeatureDetailView = ({ featureId, onBack }) => {
   }, [featureData]);
 
   const fetchFeatureDetails = async () => {
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
     try {
       const res = await fetch(`/api/v1/features/${featureId}`, {
@@ -1004,6 +1097,12 @@ const FeatureDetailView = ({ featureId, onBack }) => {
   };
 
   const handleSubmitAnswers = async () => {
+    // 如果后端不健康，不执行API调用
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法提交答案');
+      return;
+    }
+    
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/v1/features/${featureId}/answer`, {
