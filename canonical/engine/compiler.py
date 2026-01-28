@@ -290,14 +290,108 @@ class LLMCompiler:
         # Create a copy of the spec
         spec_dict = spec.model_dump()
         
-        # Apply each answer
+        # Apply each answer with basic type normalization
         for field_path, answer in answers.items():
-            self._set_nested_value(spec_dict, field_path, answer)
+            normalized_value = self._normalize_answer_value(spec_dict, field_path, answer)
+            self._set_nested_value(spec_dict, field_path, normalized_value)
         
         # Clear the spec_version to force new version generation
         spec_dict["meta"]["spec_version"] = None
         
         return CanonicalSpec.model_validate(spec_dict)
+
+    def _normalize_answer_value(
+        self,
+        spec_dict: Dict[str, Any],
+        field_path: str,
+        answer: Any,
+    ) -> Any:
+        """Normalize answer value based on field path."""
+        if not isinstance(answer, str):
+            return answer
+
+        trimmed = answer.strip()
+        if not trimmed:
+            return answer
+
+        # Try JSON decode for structured inputs
+        if trimmed.startswith("{") or trimmed.startswith("["):
+            try:
+                return json.loads(trimmed)
+            except json.JSONDecodeError:
+                pass
+
+        # List-like fields (simple newline/bullet split)
+        list_fields = {
+            "spec.non_goals",
+            "planning.known_assumptions",
+            "planning.constraints",
+        }
+        if field_path in list_fields:
+            items = [
+                line.strip().lstrip("-*•").strip()
+                for line in trimmed.splitlines()
+                if line.strip()
+            ]
+            return items
+
+        # Acceptance criteria: parse lines into AC entries
+        if field_path == "spec.acceptance_criteria":
+            ac_items = []
+            for line in trimmed.splitlines():
+                raw = line.strip().lstrip("-*•").strip()
+                if not raw:
+                    continue
+                if ":" in raw:
+                    left, right = raw.split(":", 1)
+                    ac_id = left.strip()
+                    criteria = right.strip()
+                else:
+                    ac_id = f"AC-{len(ac_items) + 1}"
+                    criteria = raw
+                if not ac_id.startswith("AC-"):
+                    ac_id = f"AC-{len(ac_items) + 1}"
+                ac_items.append({"id": ac_id, "criteria": criteria})
+            return ac_items
+
+        # Tasks: minimal fallback from plain text
+        if field_path == "planning.tasks":
+            tasks = []
+            for line in trimmed.splitlines():
+                raw = line.strip().lstrip("-*•").strip()
+                if not raw:
+                    continue
+                tasks.append({
+                    "task_id": f"T-{len(tasks) + 1}",
+                    "title": raw,
+                    "type": "dev",
+                    "scope": raw or "待补充",
+                    "deliverables": [],
+                    "dependencies": [],
+                    "affected_components": [],
+                })
+            return tasks
+
+        # V&V: minimal fallback from plain text
+        if field_path == "planning.vv":
+            vv_items = []
+            tasks = spec_dict.get("planning", {}).get("tasks", [])
+            for line in trimmed.splitlines():
+                raw = line.strip().lstrip("-*•").strip()
+                if not raw:
+                    continue
+                task_id = tasks[len(vv_items)].get("task_id") if len(tasks) > len(vv_items) else "T-1"
+                vv_items.append({
+                    "vv_id": f"VV-{len(vv_items) + 1}",
+                    "task_id": task_id,
+                    "type": "manual",
+                    "procedure": raw,
+                    "expected_result": "满足验收标准",
+                    "evidence_required": [],
+                })
+            return vv_items
+
+        return answer
 
     def plan_tasks(self, spec: CanonicalSpec) -> CanonicalSpec:
         """
@@ -491,10 +585,54 @@ class LLMCompiler:
         return f"F-{year}-{num:03d}"
 
     def _set_nested_value(self, obj: dict, path: str, value: Any) -> None:
-        """Set a nested value in a dict using dot notation path."""
-        parts = path.split(".")
-        for part in parts[:-1]:
-            if part not in obj:
-                obj[part] = {}
-            obj = obj[part]
-        obj[parts[-1]] = value
+        """Set a nested value in a dict using dot + bracket notation path."""
+        import re
+
+        def parse_part(part: str) -> list:
+            match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)(?:\[(\d+)\])?$", part)
+            if not match:
+                return [part]
+            key = match.group(1)
+            idx = match.group(2)
+            return [key, int(idx)] if idx is not None else [key]
+
+        # Expand path parts with list indices
+        expanded = []
+        for part in path.split("."):
+            expanded.extend(parse_part(part))
+
+        current = obj
+        parent = None
+        parent_key = None
+
+        for part in expanded[:-1]:
+            if isinstance(part, int):
+                if not isinstance(current, list):
+                    new_list = []
+                    if parent is not None:
+                        parent[parent_key] = new_list
+                    current = new_list
+                while len(current) <= part:
+                    current.append({})
+                parent = current
+                parent_key = part
+                current = current[part]
+            else:
+                if part not in current or current[part] is None:
+                    current[part] = {}
+                parent = current
+                parent_key = part
+                current = current[part]
+
+        last = expanded[-1]
+        if isinstance(last, int):
+            if not isinstance(current, list):
+                new_list = []
+                if parent is not None:
+                    parent[parent_key] = new_list
+                current = new_list
+            while len(current) <= last:
+                current.append(None)
+            current[last] = value
+        else:
+            current[last] = value

@@ -185,11 +185,43 @@ class Orchestrator:
         # Step: Apply Answers
         spec = self._step_apply_answers(spec, answers)
         
+        # Auto-fill background if missing
+        if not spec.spec.background or not spec.spec.background.strip():
+            # Try to generate background from goal
+            if spec.spec.goal and spec.spec.goal.strip():
+                # Use first 200 chars of goal as background
+                goal_preview = spec.spec.goal[:200].strip()
+                if len(spec.spec.goal) > 200:
+                    goal_preview += "..."
+                spec.spec.background = f"基于需求目标自动生成：{goal_preview}"
+                # Save updated spec with background
+                spec.meta.spec_version = None  # Force new version
+                new_version = self.spec_store.save(spec)
+                spec = self.spec_store.load(spec.feature.feature_id, new_version)
+        
         # Step: Re-compile if needed (apply answers might need LLM refinement)
         # For now, skip re-compile and go directly to validation
         
         # Step: Validate Gates
         gate_result = self._step_validate_gates(spec)
+        
+        # Auto-execute plan_tasks if Gate S passes but Gate T fails
+        if gate_result.gate_s.is_passed and not gate_result.gate_t.is_passed:
+            try:
+                spec, gate_result = self.plan_tasks(feature_id)
+            except Exception as e:
+                # If plan_tasks fails, continue with current gate_result
+                import traceback
+                traceback.print_exc()
+        
+        # Auto-execute generate_vv if Gate T passes but Gate V fails
+        if gate_result.gate_t.is_passed and not gate_result.gate_v.is_passed:
+            try:
+                spec, gate_result = self.generate_vv(feature_id)
+            except Exception as e:
+                # If generate_vv fails, continue with current gate_result
+                import traceback
+                traceback.print_exc()
         
         # If Gate fails and refiner is available, replace static questions with contextual ones
         if not gate_result.overall_pass and self.refiner:
