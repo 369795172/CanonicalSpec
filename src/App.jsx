@@ -25,11 +25,24 @@ const App = () => {
     return saved ? JSON.parse(saved) : [];
   });
   const [currentFeature, setCurrentFeature] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [newFeatureInput, setNewFeatureInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('list'); // 'list', 'create', 'view'
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false); // History list collapsed by default
+  
+  // Clarification mode state
+  const [clarifyingMode, setClarifyingMode] = useState(false);
+  const [clarifyingFeatureId, setClarifyingFeatureId] = useState(null); // null = 新建，有值 = 编辑已有
+  const [refineResult, setRefineResult] = useState(null);
+  const [refineContext, setRefineContext] = useState({
+    conversation_history: [],
+    round: 0,
+    feature_id: null,
+    additional_context: {}
+  });
+  const [refineLoading, setRefineLoading] = useState(false);
+  const [refineAnswers, setRefineAnswers] = useState({});
+  const [currentView, setCurrentView] = useState('current'); // 'current' or history index
   
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -239,6 +252,187 @@ const App = () => {
     }
   };
 
+  // Refine functions
+  const handleRefine = async () => {
+    // For existing features, allow empty input (will load from spec)
+    if (!clarifyingFeatureId && !newFeatureInput.trim()) return;
+    setRefineLoading(true);
+    try {
+      const endpoint = clarifyingFeatureId 
+        ? `/api/v1/features/${clarifyingFeatureId}/refine`
+        : '/api/v1/refine';
+      
+      const body = clarifyingFeatureId && !newFeatureInput.trim()
+        ? { context: refineContext }  // No input needed for existing feature
+        : { input: newFeatureInput, context: refineContext };
+      
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setRefineResult(data);
+        // Update context with new conversation history and genome
+        setRefineContext(prev => ({
+          ...prev,
+          conversation_history: [
+            ...prev.conversation_history,
+            { role: 'user', content: newFeatureInput },
+            { role: 'assistant', content: JSON.stringify(data) }
+          ],
+          round: data.round || prev.round + 1,
+          feature_id: clarifyingFeatureId || prev.feature_id,
+          additional_context: {
+            ...prev.additional_context,
+            genome: data.genome || prev.additional_context?.genome
+          }
+        }));
+      } else {
+        const error = await res.json();
+        alert(`需求分析失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to refine requirement:', err);
+      alert('需求分析失败，请重试');
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const handleRefineFeedback = async (feedback) => {
+    setRefineLoading(true);
+    try {
+      const res = await fetch('/api/v1/refine/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          feedback: feedback,
+          context: refineContext
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setRefineResult(data);
+        setRefineContext(prev => ({
+          ...prev,
+          conversation_history: [
+            ...prev.conversation_history,
+            { role: 'user', content: feedback },
+            { role: 'assistant', content: JSON.stringify(data) }
+          ],
+          round: data.round || prev.round + 1,
+          additional_context: {
+            ...prev.additional_context,
+            genome: data.genome || prev.additional_context?.genome
+          }
+        }));
+        return true;
+      } else {
+        const error = await res.json();
+        alert(`反馈处理失败: ${error.detail || '未知错误'}`);
+        return false;
+      }
+    } catch (err) {
+      console.error('Failed to apply feedback:', err);
+      alert('反馈处理失败，请重试');
+      return false;
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const handleSubmitRefined = async () => {
+    if (!refineResult || !refineResult.ready_to_compile) return;
+    setLoading(true);
+    try {
+      const endpoint = clarifyingFeatureId
+        ? `/api/v1/features/${clarifyingFeatureId}/compile`
+        : '/api/v1/run';
+      
+      const body = clarifyingFeatureId
+        ? { refine_result: refineResult }
+        : { input: newFeatureInput, refine_result: refineResult };
+      
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.feature_id) {
+          await fetchFeatures();
+          // Reset clarification state
+          setClarifyingMode(false);
+          setClarifyingFeatureId(null);
+          setRefineResult(null);
+          setRefineContext({
+            conversation_history: [],
+            round: 0,
+            feature_id: null,
+            additional_context: {}
+          });
+          setRefineAnswers({});
+          setNewFeatureInput('');
+          
+          // Navigate to feature view
+          setCurrentFeature(data.feature_id);
+          setActiveTab('view');
+        }
+      } else {
+        const error = await res.json();
+        alert(`创建功能失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to create feature:', err);
+      alert('创建功能失败，请重试');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStartClarification = (featureId = null) => {
+    setClarifyingFeatureId(featureId);
+    setClarifyingMode(true);
+    setRefineResult(null);
+    setRefineContext({
+      conversation_history: [],
+      round: 0,
+      feature_id: featureId,
+      additional_context: {}
+    });
+    setRefineAnswers({});
+    setCurrentView('current');
+    
+    // If editing existing feature, load it immediately
+    if (featureId) {
+      // Trigger refine to load existing feature data
+      setTimeout(() => {
+        handleRefine();
+      }, 100);
+    }
+  };
+
+  const handleCancelClarification = () => {
+    setClarifyingMode(false);
+    setClarifyingFeatureId(null);
+    setRefineResult(null);
+    setRefineContext({
+      conversation_history: [],
+      round: 0,
+      feature_id: null,
+      additional_context: {}
+    });
+    setRefineAnswers({});
+    setCurrentView('current');
+    setNewFeatureInput('');
+  };
+
   const currentDisplayData = activeTab === 'view' && currentFeature
     ? features.find(f => f.feature_id === currentFeature)
     : null;
@@ -252,7 +446,7 @@ const App = () => {
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           <button
             className="btn-create"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => handleStartClarification(null)}
           >
             <Sparkles size={16} style={{ marginRight: '8px' }} />
             创建功能
@@ -271,8 +465,257 @@ const App = () => {
 
       <div className="main-content">
         <div className="discovery-pane">
+          {/* Inline Clarification View */}
+          {clarifyingMode && (
+            <div className="clarification-pane" style={{ padding: '20px' }}>
+              {/* Header with back button and status */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <button
+                  onClick={handleCancelClarification}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: '0.9rem' }}
+                >
+                  <ChevronRight size={20} style={{ transform: 'rotate(180deg)' }} />
+                  返回
+                </button>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>
+                  {clarifyingFeatureId ? `编辑: ${clarifyingFeatureId}` : '创建新功能'}
+                </div>
+              </div>
+
+              {/* Input Form */}
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (refineResult && refineResult.ready_to_compile) {
+                  handleSubmitRefined();
+                } else {
+                  handleRefine();
+                }
+              }} style={{ marginBottom: '20px' }}>
+                <div style={{ position: 'relative' }}>
+                  {isRecording && (
+                    <div className="waveform-container" style={{ position: 'absolute', left: '12px', bottom: '12px', width: '200px', height: '50px' }}>
+                      <div className="waveform">
+                        {audioLevels.map((level, i) => (
+                          <div
+                            key={i}
+                            className="waveform-bar"
+                            style={{
+                              height: `${Math.max(level * 100, 5)}%`,
+                              backgroundColor: `rgba(44, 107, 237, ${0.3 + level * 0.7})`
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <textarea
+                    value={newFeatureInput}
+                    onChange={(e) => setNewFeatureInput(e.target.value)}
+                    placeholder="描述你想实现的功能，例如：我想做一个健身网站"
+                    rows={6}
+                    disabled={loading || isRecording || refineLoading}
+                    style={{ 
+                      width: '100%', 
+                      paddingLeft: isRecording ? '240px' : '12px', 
+                      paddingRight: '80px',
+                      paddingTop: '12px',
+                      paddingBottom: '12px',
+                      fontSize: '0.9rem',
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      color: 'var(--text)',
+                      resize: 'vertical'
+                    }}
+                  />
+                  <div style={{ position: 'absolute', right: '12px', bottom: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {isTranscribing && (
+                      <div className="transcribing-indicator" style={{ position: 'static' }}>
+                        <div className="loader" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)', marginLeft: '8px' }}>Transcribing...</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className={`btn-voice ${isRecording ? 'recording' : ''} ${isTranscribing ? 'transcribing' : ''}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (isRecording) {
+                          stopRecording();
+                        } else {
+                          startRecording();
+                        }
+                      }}
+                      disabled={loading || isTranscribing || refineLoading}
+                      style={{ position: 'static' }}
+                    >
+                      {isRecording ? <Square size={24} /> : isTranscribing ? <div className="loader" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <Mic size={20} />}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Refinement Result Display */}
+              {refineResult && (() => {
+                // Determine which data to display based on currentView
+                let displayData = refineResult;
+                
+                if (currentView !== 'current' && refineResult.genome?.history) {
+                  const historyIndex = parseInt(currentView);
+                  const history = refineResult.genome.history.slice().reverse();
+                  if (history[historyIndex]) {
+                    const snapshot = history[historyIndex];
+                    displayData = {
+                      ...refineResult,
+                      understanding_summary: snapshot.summary,
+                      round: snapshot.round,
+                    };
+                  }
+                }
+                
+                return (
+                  <div className="clarification-content">
+                    {/* Main Content Area */}
+                    <div className="clarification-main" style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                      {/* Changes Highlight */}
+                      {currentView === 'current' && refineResult.changes && <GenomeChanges changes={refineResult.changes} />}
+                      
+                      {/* Understanding Summary */}
+                      <div style={{ marginBottom: '20px' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>
+                            <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                            AI 需求理解
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: '#888', fontWeight: 400 }}>
+                            第 {displayData.round} 轮
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
+                          <ReactMarkdown>{displayData.understanding_summary}</ReactMarkdown>
+                        </div>
+                      </div>
+
+                      {/* Inferred Assumptions */}
+                      {currentView === 'current' && displayData.inferred_assumptions && displayData.inferred_assumptions.length > 0 && (
+                        <div style={{ marginBottom: '20px' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
+                            推断的假设
+                          </div>
+                          <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#aaa' }}>
+                            {displayData.inferred_assumptions.map((assumption, i) => (
+                              <li key={i}>{assumption}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Questions */}
+                      {currentView === 'current' && displayData.questions && displayData.questions.length > 0 && (
+                        <div style={{ marginBottom: '20px' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '12px', fontWeight: 600 }}>
+                            <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                            需要澄清的问题 ({displayData.questions.length})
+                          </div>
+                          {displayData.questions.map((q, i) => (
+                            <div key={q.id || i} style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                              <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>
+                                {q.question}
+                              </div>
+                              {q.why_asking && (
+                                <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '8px' }}>
+                                  为什么需要：{q.why_asking}
+                                </div>
+                              )}
+                              {q.suggestions && q.suggestions.length > 0 && (
+                                <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '8px' }}>
+                                  建议：{q.suggestions.join('、')}
+                                </div>
+                              )}
+                              <textarea
+                                value={refineAnswers[q.id] || ''}
+                                onChange={(e) => setRefineAnswers({...refineAnswers, [q.id]: e.target.value})}
+                                placeholder="请输入你的回答..."
+                                rows={2}
+                                disabled={refineLoading || loading}
+                                style={{ width: '100%', padding: '8px', fontSize: '0.85rem', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Ready to Compile Indicator */}
+                      {currentView === 'current' && displayData.ready_to_compile && (
+                        <div style={{ padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', marginTop: '16px' }}>
+                          <div style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 500 }}>
+                            <CheckCircle2 size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                            需求已足够清晰，可以开始创建功能
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Sidebar - Genome Status */}
+                    {refineResult.genome && (
+                      <div className="clarification-sidebar">
+                        <GenomeStatus 
+                          genome={refineResult.genome} 
+                          currentView={currentView}
+                          onViewChange={setCurrentView}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px', paddingTop: '20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+                <button 
+                  onClick={handleCancelClarification} 
+                  disabled={loading || refineLoading}
+                  style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)', cursor: 'pointer' }}
+                >
+                  取消
+                </button>
+                {refineResult && !refineResult.ready_to_compile && refineResult.questions && refineResult.questions.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      const feedback = refineResult.questions.map(q => {
+                        const answer = refineAnswers[q.id] || '';
+                        return `${q.question}\n${answer}`;
+                      }).join('\n\n');
+                      await handleRefineFeedback(feedback);
+                      setRefineAnswers({});
+                    }}
+                    disabled={refineLoading || Object.keys(refineAnswers).length === 0}
+                    style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
+                  >
+                    {refineLoading ? '分析中...' : '提交回答并继续细化'}
+                  </button>
+                )}
+                <button 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (refineResult && refineResult.ready_to_compile) {
+                      handleSubmitRefined();
+                    } else {
+                      handleRefine();
+                    }
+                  }}
+                  disabled={loading || refineLoading || (!clarifyingFeatureId && !newFeatureInput.trim())}
+                  style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
+                >
+                  {loading ? '创建中...' : refineResult && refineResult.ready_to_compile ? '创建功能' : '开始分析'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* History minimized by default - show only toggle button */}
-          {activeTab === 'list' && !isHistoryExpanded && (
+          {!clarifyingMode && activeTab === 'list' && !isHistoryExpanded && (
             <div className="history-minimized">
               <div className="welcome-section">
                 <Sparkles size={48} style={{ marginBottom: '20px', color: 'var(--accent)' }} />
@@ -292,7 +735,7 @@ const App = () => {
           )}
 
           {/* History expanded - show full list */}
-          {activeTab === 'list' && isHistoryExpanded && (
+          {!clarifyingMode && activeTab === 'list' && isHistoryExpanded && (
             <div className="history-expanded">
               <button 
                 className="btn-history-collapse"
@@ -316,8 +759,12 @@ const App = () => {
                       key={feature.feature_id}
                       className={`feature-card ${activeTab === 'view' && currentFeature === feature.feature_id ? 'selected' : ''}`}
                       onClick={() => {
-                        setCurrentFeature(feature.feature_id);
-                        setActiveTab('view');
+                        if (feature.status === 'clarifying') {
+                          handleStartClarification(feature.feature_id);
+                        } else {
+                          setCurrentFeature(feature.feature_id);
+                          setActiveTab('view');
+                        }
                       }}
                     >
                       <div className="feature-header">
@@ -348,7 +795,7 @@ const App = () => {
             </div>
           )}
 
-          {activeTab === 'view' && currentDisplayData && (
+          {!clarifyingMode && activeTab === 'view' && currentDisplayData && (
             <FeatureDetailView featureId={currentFeature} onBack={() => setActiveTab('list')} />
           )}
         </div>
@@ -375,7 +822,7 @@ const App = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 className={activeTab === 'create' ? 'active' : ''}
-                onClick={() => setShowCreateModal(true)}
+                onClick={() => handleStartClarification(null)}
                 style={{ width: '100%', justifyContent: 'flex-start' }}
               >
                 <Sparkles size={16} /> 创建功能
@@ -421,11 +868,11 @@ const App = () => {
             placeholder="描述你想实现的功能，或点击麦克风按钮进行语音输入..."
             value={newFeatureInput}
             onChange={(e) => setNewFeatureInput(e.target.value)}
-            disabled={loading || isRecording}
+            disabled={loading || isRecording || clarifyingMode}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !loading && !isRecording) {
+              if (e.key === 'Enter' && !e.shiftKey && !loading && !isRecording && !clarifyingMode && newFeatureInput.trim()) {
                 e.preventDefault();
-                handleCreateFeature();
+                handleStartClarification(null);
               }
             }}
           />
@@ -448,32 +895,23 @@ const App = () => {
         </div>
         <button
           className="btn-generate"
-          onClick={handleCreateFeature}
-          disabled={loading || isRecording || !newFeatureInput.trim()}
+          onClick={() => {
+            if (clarifyingMode) {
+              if (refineResult && refineResult.ready_to_compile) {
+                handleSubmitRefined();
+              } else {
+                handleRefine();
+              }
+            } else {
+              handleStartClarification(null);
+            }
+          }}
+          disabled={(loading || isRecording || refineLoading) || (!clarifyingMode && !newFeatureInput.trim()) || (clarifyingMode && !newFeatureInput.trim() && !refineResult)}
         >
-          {loading ? <div className="loader" style={{ width: 24, height: 24, borderWidth: 2 }} /> : <Sparkles size={32} />}
+          {(loading || refineLoading) ? <div className="loader" style={{ width: 24, height: 24, borderWidth: 2 }} /> : <Sparkles size={32} />}
         </button>
       </div>
 
-      {/* Create Modal */}
-      {showCreateModal && (
-        <CreateModal
-          isOpen={showCreateModal}
-          onClose={() => {
-            setShowCreateModal(false);
-            setNewFeatureInput('');
-          }}
-          input={newFeatureInput}
-          setInput={setNewFeatureInput}
-          onSubmit={handleCreateFeature}
-          loading={loading}
-          isRecording={isRecording}
-          isTranscribing={isTranscribing}
-          audioLevels={audioLevels}
-          startRecording={startRecording}
-          stopRecording={stopRecording}
-        />
-      )}
 
       {loading && (
         <div className="status-overlay">
@@ -490,7 +928,7 @@ const App = () => {
   );
 };
 
-// Clarification Panel Component
+// Clarification Panel Component (kept for FeatureDetailView compatibility)
 const ClarificationPanel = ({ questions, answers, setAnswers, onSubmit, isSubmitting }) => {
   if (!questions || questions.length === 0) return null;
 
@@ -755,353 +1193,5 @@ const FeatureDetailView = ({ featureId, onBack }) => {
   );
 };
 
-// Create Modal Component with Refinement Support
-const CreateModal = ({ isOpen, onClose, input, setInput, onSubmit, loading, isRecording, isTranscribing, audioLevels, startRecording, stopRecording }) => {
-  const [refineResult, setRefineResult] = useState(null);
-  const [refineContext, setRefineContext] = useState({
-    conversation_history: [],
-    round: 0,
-    feature_id: null,
-    additional_context: {}
-  });
-  const [refineLoading, setRefineLoading] = useState(false);
-  const [refineAnswers, setRefineAnswers] = useState({});
-  const [currentView, setCurrentView] = useState('current'); // 'current' or history index
-
-  if (!isOpen) return null;
-
-  const handleRefine = async () => {
-    if (!input.trim()) return;
-    setRefineLoading(true);
-    try {
-      const res = await fetch('/api/v1/refine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: input,
-          context: refineContext
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRefineResult(data);
-        // Update context with new conversation history and genome
-        setRefineContext(prev => ({
-          ...prev,
-          conversation_history: [
-            ...prev.conversation_history,
-            { role: 'user', content: input },
-            { role: 'assistant', content: JSON.stringify(data) }
-          ],
-          round: data.round || prev.round + 1,
-          additional_context: {
-            ...prev.additional_context,
-            genome: data.genome || prev.additional_context?.genome
-          }
-        }));
-      } else {
-        const error = await res.json();
-        alert(`需求分析失败: ${error.detail || '未知错误'}`);
-      }
-    } catch (err) {
-      console.error('Failed to refine requirement:', err);
-      alert('需求分析失败，请重试');
-    } finally {
-      setRefineLoading(false);
-    }
-  };
-
-  const handleRefineFeedback = async (feedback) => {
-    setRefineLoading(true);
-    try {
-      const res = await fetch('/api/v1/refine/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          feedback: feedback,
-          context: refineContext
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setRefineResult(data);
-        setRefineContext(prev => ({
-          ...prev,
-          conversation_history: [
-            ...prev.conversation_history,
-            { role: 'user', content: feedback },
-            { role: 'assistant', content: JSON.stringify(data) }
-          ],
-          round: data.round || prev.round + 1,
-          additional_context: {
-            ...prev.additional_context,
-            genome: data.genome || prev.additional_context?.genome
-          }
-        }));
-        return true;
-      } else {
-        const error = await res.json();
-        alert(`反馈处理失败: ${error.detail || '未知错误'}`);
-        return false;
-      }
-    } catch (err) {
-      console.error('Failed to apply feedback:', err);
-      alert('反馈处理失败，请重试');
-      return false;
-    } finally {
-      setRefineLoading(false);
-    }
-  };
-
-  const handleSubmitRefined = async () => {
-    if (!refineResult || !refineResult.ready_to_compile) return;
-    setLoading(true);
-    try {
-      const res = await fetch('/api/v1/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input: input,
-          refine_result: refineResult
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.feature_id) {
-          onSubmit(); // This will trigger parent's onSubmit which handles navigation
-        }
-      }
-    } catch (err) {
-      console.error('Failed to create feature:', err);
-      alert('创建功能失败，请重试');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (refineResult && refineResult.ready_to_compile) {
-      handleSubmitRefined();
-    } else {
-      handleRefine();
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}>
-        <div className="modal-header">
-          <h2>创建新功能</h2>
-          <button className="btn-close" onClick={onClose}>
-            <Trash2 size={20} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>
-              <FileText size={16} style={{ marginRight: '8px' }} />
-              功能描述
-            </label>
-            <div style={{ position: 'relative' }}>
-              {isRecording && (
-                <div className="waveform-container" style={{ position: 'absolute', left: '12px', bottom: '12px', width: '200px', height: '50px' }}>
-                  <div className="waveform">
-                    {audioLevels.map((level, i) => (
-                      <div
-                        key={i}
-                        className="waveform-bar"
-                        style={{
-                          height: `${Math.max(level * 100, 5)}%`,
-                          backgroundColor: `rgba(44, 107, 237, ${0.3 + level * 0.7})`
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="描述你想实现的功能，例如：我想做一个健身网站"
-                rows={6}
-                disabled={loading || isRecording || refineLoading}
-                style={{ paddingLeft: isRecording ? '240px' : '12px', paddingRight: '80px' }}
-              />
-              <div style={{ position: 'absolute', right: '12px', bottom: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                {isTranscribing && (
-                  <div className="transcribing-indicator" style={{ position: 'static' }}>
-                    <div className="loader" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--accent)', marginLeft: '8px' }}>Transcribing...</span>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className={`btn-voice ${isRecording ? 'recording' : ''} ${isTranscribing ? 'transcribing' : ''}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (isRecording) {
-                      stopRecording();
-                    } else {
-                      startRecording();
-                    }
-                  }}
-                  disabled={loading || isTranscribing || refineLoading}
-                  style={{ position: 'static' }}
-                >
-                  {isRecording ? <Square size={24} /> : isTranscribing ? <div className="loader" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <Mic size={20} />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Refinement Result Display */}
-          {refineResult && (() => {
-            // Determine which data to display based on currentView
-            let displayData = refineResult;
-            
-            if (currentView !== 'current' && refineResult.genome?.history) {
-              const historyIndex = parseInt(currentView);
-              const history = refineResult.genome.history.slice().reverse();
-              if (history[historyIndex]) {
-                const snapshot = history[historyIndex];
-                // Create a display result from snapshot
-                displayData = {
-                  ...refineResult,
-                  understanding_summary: snapshot.summary,
-                  round: snapshot.round,
-                };
-              }
-            }
-            
-            return (
-            <div style={{ marginTop: '20px', display: 'flex', gap: '20px' }}>
-              {/* Main Content Area */}
-              <div style={{ flex: '1', padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                {/* Changes Highlight (only show for current view) */}
-                {currentView === 'current' && refineResult.changes && <GenomeChanges changes={refineResult.changes} />}
-                
-                {/* Understanding Summary */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>
-                      <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
-                      AI 需求理解
-                    </span>
-                    <span style={{ fontSize: '0.7rem', color: '#888', fontWeight: 400 }}>
-                      第 {displayData.round} 轮
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
-                    <ReactMarkdown>{displayData.understanding_summary}</ReactMarkdown>
-                  </div>
-                </div>
-
-              {/* Inferred Assumptions (only show for current view) */}
-              {currentView === 'current' && displayData.inferred_assumptions && displayData.inferred_assumptions.length > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
-                    推断的假设
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#aaa' }}>
-                    {displayData.inferred_assumptions.map((assumption, i) => (
-                      <li key={i}>{assumption}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Questions (only show for current view) */}
-              {currentView === 'current' && displayData.questions && displayData.questions.length > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '12px', fontWeight: 600 }}>
-                    <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
-                    需要澄清的问题 ({displayData.questions.length})
-                  </div>
-                  {displayData.questions.map((q, i) => (
-                    <div key={q.id || i} style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>
-                        {q.question}
-                      </div>
-                      {q.why_asking && (
-                        <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '8px' }}>
-                          为什么需要：{q.why_asking}
-                        </div>
-                      )}
-                      {q.suggestions && q.suggestions.length > 0 && (
-                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '8px' }}>
-                          建议：{q.suggestions.join('、')}
-                        </div>
-                      )}
-                      <textarea
-                        value={refineAnswers[q.id] || ''}
-                        onChange={(e) => setRefineAnswers({...refineAnswers, [q.id]: e.target.value})}
-                        placeholder="请输入你的回答..."
-                        rows={2}
-                        disabled={refineLoading || loading}
-                        style={{ width: '100%', padding: '8px', fontSize: '0.85rem', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Ready to Compile Indicator (only show for current view) */}
-              {currentView === 'current' && displayData.ready_to_compile && (
-                <div style={{ padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', marginTop: '16px' }}>
-                  <div style={{ fontSize: '0.85rem', color: '#10b981', fontWeight: 500 }}>
-                    <CheckCircle2 size={14} style={{ marginRight: '6px', display: 'inline' }} />
-                    需求已足够清晰，可以开始创建功能
-                  </div>
-                </div>
-              )}
-              </div>
-              
-              {/* Sidebar - Genome Status */}
-              {refineResult.genome && (
-                <div style={{ width: '280px', flexShrink: 0 }}>
-                  <GenomeStatus 
-                    genome={refineResult.genome} 
-                    currentView={currentView}
-                    onViewChange={setCurrentView}
-                  />
-                </div>
-              )}
-            </div>
-            );
-          })()}
-
-          <div className="modal-actions">
-            <button type="button" onClick={onClose} disabled={loading || refineLoading}>
-              取消
-            </button>
-            {refineResult && !refineResult.ready_to_compile && refineResult.questions && refineResult.questions.length > 0 && (
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={refineLoading || Object.keys(refineAnswers).length === 0}
-                onClick={async () => {
-                  // Collect answers
-                  const feedback = refineResult.questions.map(q => {
-                    const answer = refineAnswers[q.id] || '';
-                    return `${q.question}\n${answer}`;
-                  }).join('\n\n');
-                  await handleRefineFeedback(feedback);
-                  setRefineAnswers({});
-                }}
-              >
-                {refineLoading ? '分析中...' : '提交回答并继续细化'}
-              </button>
-            )}
-            <button type="submit" className="btn-primary" disabled={loading || refineLoading || !input.trim()}>
-              {loading ? '创建中...' : refineResult && refineResult.ready_to_compile ? '创建功能' : '开始分析'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
 
 export default App;

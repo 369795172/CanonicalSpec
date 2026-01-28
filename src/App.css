@@ -61,6 +61,7 @@ header {
   gap: 30px;
   overflow: hidden;
   padding-bottom: 30px;
+  min-height: 0;
 }
 
 .discovery-pane {
@@ -70,6 +71,28 @@ header {
   gap: 20px;
   overflow-y: auto;
   padding-right: 10px;
+  min-height: 0;
+}
+
+/* Clarification Mode - scrollable content area */
+.clarification-pane {
+  /* No flex: 1 here - let content determine height, parent handles scroll */
+}
+
+.clarification-content {
+  display: flex;
+  gap: 20px;
+}
+
+.clarification-main {
+  flex: 1;
+  min-width: 0; /* Prevent flex item from overflowing */
+}
+
+/* Genome sidebar in clarification view */
+.clarification-sidebar {
+  width: 280px;
+  flex-shrink: 0;
 }
 
 .discovery-pane::-webkit-scrollbar {

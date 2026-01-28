@@ -344,6 +344,135 @@ async def refine_feedback(body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/v1/features/{feature_id}/refine")
+async def refine_existing_feature(feature_id: str, body: dict):
+    """
+    Start refinement flow for an existing feature.
+    Initializes Genome from existing spec and returns RefineResult.
+    
+    Request body:
+    {
+        "input": "optional user input",
+        "context": {
+            "conversation_history": [...],
+            "round": 0,
+            "feature_id": "...",
+            "additional_context": {}
+        }
+    }
+    """
+    try:
+        if not refiner:
+            raise HTTPException(
+                status_code=503,
+                detail="Requirement Refiner not available. Please configure CANONICAL_LLM_API_KEY."
+            )
+        
+        # Load existing spec
+        feature_dir = spec_store.base_dir / feature_id
+        if not feature_dir.exists():
+            raise HTTPException(status_code=404, detail="Feature not found")
+        
+        spec_files = sorted(feature_dir.glob("S-*.json"), reverse=True)
+        if not spec_files:
+            raise HTTPException(status_code=404, detail="Spec not found")
+        
+        latest_spec_file = spec_files[0]
+        with open(latest_spec_file, 'r', encoding='utf-8') as f:
+            spec_data = json.load(f)
+            spec = CanonicalSpec.model_validate(spec_data)
+        
+        # Parse context if provided
+        context_data = body.get("context")
+        context = None
+        if context_data:
+            try:
+                context = RefineContext.model_validate(context_data)
+                context.feature_id = feature_id
+            except Exception as e:
+                print(f"Warning: Failed to parse context: {e}")
+                context = None
+        
+        if context is None:
+            context = RefineContext(
+                round=0,
+                feature_id=feature_id,
+            )
+        
+        # Initialize refinement from spec
+        input_text = body.get("input", "")
+        if input_text:
+            # User provided new input, use refine with context
+            refine_result = refiner.refine(input_text, context)
+        else:
+            # No new input, initialize from spec
+            refine_result = refiner.refine_from_spec(spec, context)
+        
+        return refine_result.model_dump()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/features/{feature_id}/compile")
+async def compile_refined_feature(feature_id: str, body: dict):
+    """
+    Compile RefineResult back to existing feature spec.
+    Updates the feature instead of creating a new one.
+    
+    Request body:
+    {
+        "refine_result": {
+            "round": 2,
+            "understanding_summary": "...",
+            "ready_to_compile": true,
+            "draft_spec": {...},
+            "genome": {...}
+        }
+    }
+    """
+    try:
+        refine_result_data = body.get("refine_result")
+        if not refine_result_data:
+            raise HTTPException(status_code=400, detail="refine_result is required")
+        
+        # Parse refine_result
+        try:
+            refine_result = RefineResult.model_validate(refine_result_data)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid refine_result: {str(e)}")
+        
+        # Compile to existing feature
+        spec, gate_result = orchestrator.compile_to_existing(feature_id, refine_result)
+        
+        return {
+            "feature_id": spec.feature.feature_id,
+            "feature": {
+                "feature_id": spec.feature.feature_id,
+                "title": spec.feature.title or "",
+                "status": spec.feature.status.value if isinstance(spec.feature.status, FeatureStatus) else spec.feature.status,
+            },
+            "spec": spec.model_dump(mode='json'),
+            "gate_result": {
+                "overall_pass": gate_result.overall_pass,
+                "completeness_score": gate_result.completeness_score,
+                "next_action": gate_result.next_action,
+                "clarify_questions": [q.model_dump() for q in gate_result.clarify_questions],
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/v1/transcribe")
 async def transcribe_audio(audio_file: UploadFile = File(...)):
     """

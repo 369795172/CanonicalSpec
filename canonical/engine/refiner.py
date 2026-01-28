@@ -301,6 +301,82 @@ class RequirementRefiner:
         # Continue refinement
         return self.refine("", context)
 
+    def refine_from_spec(
+        self,
+        spec: CanonicalSpec,
+        context: Optional[RefineContext] = None,
+    ) -> RefineResult:
+        """
+        Initialize refinement from an existing spec.
+        Builds initial Genome from spec data.
+        
+        Args:
+            spec: Existing CanonicalSpec
+            context: Optional refinement context
+            
+        Returns:
+            RefineResult with initialized Genome
+        """
+        if context is None:
+            context = RefineContext(
+                round=0,
+                feature_id=spec.feature.feature_id,
+            )
+        
+        # Build initial genome from spec
+        genome = None
+        if RequirementGenome:
+            # Extract goals and non-goals
+            goals = []
+            if spec.spec.goal:
+                goals.append(spec.spec.goal)
+            
+            non_goals = spec.spec.non_goals or []
+            
+            # Extract assumptions from planning
+            assumptions = []
+            if spec.planning and spec.planning.known_assumptions:
+                for i, assumption_text in enumerate(spec.planning.known_assumptions):
+                    assumptions.append(Assumption(
+                        id=f"A-{i+1}",
+                        content=assumption_text,
+                        source_round=0,
+                        confirmed=True,  # Already in spec, considered confirmed
+                    ))
+            
+            # Extract constraints
+            constraints = []
+            if spec.planning and spec.planning.constraints:
+                for i, constraint_text in enumerate(spec.planning.constraints):
+                    constraints.append(Constraint(
+                        id=f"C-{i+1}",
+                        content=constraint_text,
+                        source_round=0,
+                        type="general",
+                    ))
+            
+            # Create genome
+            genome = RequirementGenome(
+                genome_version=f"G-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                round=context.round,
+                summary=f"已有功能：{spec.feature.title or spec.feature.feature_id}",
+                goals=goals,
+                non_goals=non_goals,
+                assumptions=assumptions,
+                constraints=constraints,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+            
+            # Store genome in context
+            if context.additional_context is None:
+                context.additional_context = {}
+            context.additional_context['genome'] = genome.model_dump()
+        
+        # Now call refine with empty input to generate questions
+        # The genome will be used from context
+        return self.refine("", context)
+
     def generate_clarify_questions(
         self,
         spec: CanonicalSpec,

@@ -348,6 +348,123 @@ class Orchestrator:
         
         return self.gate_engine.validate(spec)
 
+    def compile_to_existing(
+        self,
+        feature_id: str,
+        refine_result: RefineResult,
+    ) -> Tuple[CanonicalSpec, GateResult]:
+        """
+        Compile RefineResult back to an existing feature spec.
+        Updates the existing feature instead of creating a new one.
+        
+        Args:
+            feature_id: Existing feature ID
+            refine_result: RefineResult from refinement process
+            
+        Returns:
+            Tuple of (updated CanonicalSpec, GateResult)
+        """
+        # Load existing spec
+        spec = self.spec_store.load(feature_id)
+        if not spec:
+            raise ValueError(f"Feature {feature_id} not found")
+        
+        # Start new run or continue
+        if self._current_run_id is None:
+            self._current_run_id = self.snapshot_store.generate_run_id()
+            self._step_seq = 0
+        
+        old_version = spec.meta.spec_version
+        
+        # Update spec from refine_result
+        if refine_result.draft_spec:
+            # Update goal
+            if refine_result.draft_spec.get("goal"):
+                spec.spec.goal = refine_result.draft_spec["goal"]
+            
+            # Update acceptance criteria
+            if refine_result.draft_spec.get("acceptance_criteria"):
+                from canonical.models.spec import AcceptanceCriteria
+                acceptance_criteria = []
+                for i, ac_data in enumerate(refine_result.draft_spec["acceptance_criteria"]):
+                    if isinstance(ac_data, dict):
+                        ac_id = ac_data.get("id", f"AC-{i+1}")
+                        if not ac_id.startswith("AC-"):
+                            ac_id = f"AC-{i+1}"
+                        acceptance_criteria.append(AcceptanceCriteria(
+                            id=ac_id,
+                            criteria=ac_data.get("criteria", ""),
+                        ))
+                    elif isinstance(ac_data, str):
+                        acceptance_criteria.append(AcceptanceCriteria(
+                            id=f"AC-{i+1}",
+                            criteria=ac_data,
+                        ))
+                spec.spec.acceptance_criteria = acceptance_criteria
+        
+        # Update assumptions and constraints from genome if available
+        if refine_result.genome:
+            # Update assumptions
+            if refine_result.genome.assumptions:
+                if spec.planning is None:
+                    from canonical.models.spec import Planning
+                    spec.planning = Planning()
+                spec.planning.known_assumptions = [
+                    a.content for a in refine_result.genome.assumptions
+                ]
+            
+            # Update constraints
+            if refine_result.genome.constraints:
+                if spec.planning is None:
+                    from canonical.models.spec import Planning
+                    spec.planning = Planning()
+                spec.planning.constraints = [
+                    c.content for c in refine_result.genome.constraints
+                ]
+        
+        # Save updated spec
+        new_version = self.spec_store.save(spec)
+        updated_spec = self.spec_store.load(feature_id, new_version)
+        
+        # Create snapshot
+        snapshot = StepSnapshot(
+            run_id=self._current_run_id,
+            feature_id=feature_id,
+            spec_version_in=old_version,
+            spec_version_out=new_version,
+            step=Step(name=StepName.COMPILE, seq=self._step_seq + 1),
+            inputs=StepInput(
+                canonical_spec_ref=old_version,
+                additional={"refine_result": refine_result.model_dump() if hasattr(refine_result, 'model_dump') else str(refine_result)},
+            ),
+            outputs=StepOutput(spec_version_out=new_version),
+            decisions=[StepDecision(
+                decision="compiled_from_refine",
+                reason="Spec updated from refinement result",
+                next_step="validate_gates",
+            )],
+        )
+        snapshot.mark_completed()
+        self.snapshot_store.save(snapshot)
+        
+        # Validate gates
+        gate_result = self._step_validate_gates(updated_spec)
+        
+        # Update status
+        if gate_result.overall_pass:
+            updated_spec.feature.status = FeatureStatus.EXECUTABLE_READY
+        else:
+            updated_spec.feature.status = FeatureStatus.CLARIFYING
+        
+        # Update spec file
+        spec_file = self.spec_store.base_dir / feature_id / f"{new_version}.json"
+        if spec_file.exists():
+            import json
+            with open(spec_file, 'w', encoding='utf-8') as f:
+                json.dump(updated_spec.model_dump(mode='json'), f, indent=2, ensure_ascii=False, default=str)
+        
+        return updated_spec, gate_result
+
     # Private step methods
 
     def _step_ingest(self, user_input: str, feature_id: Optional[str]) -> Dict[str, Any]:
