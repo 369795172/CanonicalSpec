@@ -7,6 +7,8 @@ const GenomeChanges = ({ changes }) => {
   const hasChanges = 
     changes.new_assumptions?.length > 0 ||
     changes.new_constraints?.length > 0 ||
+    changes.new_user_stories?.length > 0 ||
+    changes.updated_fields?.length > 0 ||
     changes.decisions_made?.length > 0;
   
   if (!hasChanges) return null;
@@ -50,6 +52,34 @@ const GenomeChanges = ({ changes }) => {
             color: '#10b981'
           }}>
             <Plus size={12} /> 约束: {c}
+          </div>
+        ))}
+        {changes.new_user_stories?.map((us, i) => (
+          <div key={`us-${i}`} style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '6px', 
+            fontSize: '0.8rem', 
+            padding: '6px 8px', 
+            borderRadius: '4px',
+            background: 'rgba(16, 185, 129, 0.1)',
+            color: '#10b981'
+          }}>
+            <Plus size={12} /> 用户故事: {us}
+          </div>
+        ))}
+        {changes.updated_fields?.map((field, i) => (
+          <div key={`field-${i}`} style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '6px', 
+            fontSize: '0.8rem', 
+            padding: '6px 8px', 
+            borderRadius: '4px',
+            background: 'rgba(59, 130, 246, 0.1)',
+            color: '#3b82f6'
+          }}>
+            <RefreshCw size={12} /> {field}
           </div>
         ))}
         {changes.decisions_made?.map((d, i) => (

@@ -43,6 +43,23 @@ const App = () => {
   const [clarifyingMode, setClarifyingMode] = useState(false);
   const [clarifyingFeatureId, setClarifyingFeatureId] = useState(null); // null = 新建，有值 = 编辑已有
   const [refineResult, setRefineResult] = useState(null);
+  
+  // Debug: Track refineResult changes
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:45',message:'refineResult state changed',data:{hasRefineResult:!!refineResult,readyToCompile:refineResult?.ready_to_compile,round:refineResult?.round,hasGenome:!!refineResult?.genome},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
+    // Scroll to result area when refineResult updates
+    if (refineResult && clarifyingMode) {
+      setTimeout(() => {
+        const resultElement = document.querySelector('.clarification-content');
+        if (resultElement) {
+          resultElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+  }, [refineResult, clarifyingMode]);
   const [refineContext, setRefineContext] = useState({
     conversation_history: [],
     round: 0,
@@ -52,6 +69,7 @@ const App = () => {
   const [refineLoading, setRefineLoading] = useState(false);
   const [refineAnswers, setRefineAnswers] = useState({});
   const [currentView, setCurrentView] = useState('current'); // 'current' or history index
+  const [bypassLimit, setBypassLimit] = useState(false); // Allow user to bypass clarification limit
   
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -70,6 +88,9 @@ const App = () => {
 
   // 自动保存输入到 localStorage
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:72',message:'newFeatureInput state changed',data:{newFeatureInputLength:newFeatureInput?.length,newFeatureInputValue:newFeatureInput?.substring(0,50),willSaveToLocalStorage:!!newFeatureInput.trim()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     if (newFeatureInput.trim()) {
       localStorage.setItem('canonical_draft_input', newFeatureInput);
     } else {
@@ -291,14 +312,30 @@ const App = () => {
 
   // Refine functions
   const handleRefine = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:293',message:'handleRefine called',data:{clarifyingFeatureId,newFeatureInputLength:newFeatureInput?.length,newFeatureInputValue:newFeatureInput?.substring(0,50),isHealthy},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // For existing features, allow empty input (will load from spec)
-    if (!clarifyingFeatureId && !newFeatureInput.trim()) return;
+    if (!clarifyingFeatureId && !newFeatureInput.trim()) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:296',message:'handleRefine early return - empty input',data:{clarifyingFeatureId,newFeatureInputTrimmed:newFeatureInput.trim()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      return;
+    }
     
     // 如果后端不健康，不执行API调用
     if (isHealthy === false) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:300',message:'handleRefine early return - backend unhealthy',data:{isHealthy},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       alert('后端服务不可用，无法进行需求分析');
       return;
     }
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:304',message:'handleRefine before API call',data:{endpoint:clarifyingFeatureId?`/api/v1/features/${clarifyingFeatureId}/refine`:'/api/v1/refine',inputLength:newFeatureInput?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     setRefineLoading(true);
     try {
@@ -310,14 +347,26 @@ const App = () => {
         ? { context: refineContext }  // No input needed for existing feature
         : { input: newFeatureInput, context: refineContext };
       
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:316',message:'handleRefine API request',data:{endpoint,bodyInputLength:body.input?.length,hasContext:!!body.context},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:323',message:'handleRefine API response',data:{status:res.status,ok:res.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
       if (res.ok) {
         const data = await res.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:327',message:'handleRefine API success - before setState',data:{hasData:!!data,hasGenome:!!data.genome,round:data.round,readyToCompile:data.ready_to_compile,hasUnderstandingSummary:!!data.understanding_summary,understandingSummaryLength:data.understanding_summary?.length,hasQuestions:!!data.questions,questionsCount:data.questions?.length,hasInferredAssumptions:!!data.inferred_assumptions,inferredAssumptionsCount:data.inferred_assumptions?.length,dataKeys:Object.keys(data)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        
         setRefineResult(data);
         // Update context with new conversation history and genome
         setRefineContext(prev => ({
@@ -334,15 +383,28 @@ const App = () => {
             genome: data.genome || prev.additional_context?.genome
           }
         }));
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:343',message:'handleRefine API success - after setState',data:{newFeatureInputLength:newFeatureInput?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
       } else {
         const error = await res.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:346',message:'handleRefine API error',data:{status:res.status,errorDetail:error.detail},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
         alert(`需求分析失败: ${error.detail || '未知错误'}`);
       }
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:351',message:'handleRefine exception',data:{errorMessage:err.message,errorStack:err.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error('Failed to refine requirement:', err);
       alert('需求分析失败，请重试');
     } finally {
       setRefineLoading(false);
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:355',message:'handleRefine finally - loading set to false',data:{newFeatureInputLength:newFeatureInput?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
     }
   };
 
@@ -462,6 +524,9 @@ const App = () => {
   };
 
   const handleStartClarification = (featureId = null) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:520',message:'handleStartClarification called',data:{featureId,newFeatureInputLength:newFeatureInput?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
     setClarifyingFeatureId(featureId);
     setClarifyingMode(true);
     setRefineResult(null);
@@ -473,6 +538,7 @@ const App = () => {
     });
     setRefineAnswers({});
     setCurrentView('current');
+    setBypassLimit(false); // Reset bypass flag
     
     // If editing existing feature, load it immediately
     if (featureId) {
@@ -494,6 +560,7 @@ const App = () => {
       additional_context: {}
     });
     setRefineAnswers({});
+    setBypassLimit(false); // Reset bypass flag
     setCurrentView('current');
     setNewFeatureInput('');
   };
@@ -551,6 +618,9 @@ const App = () => {
 
               {/* Input Form */}
               <form onSubmit={(e) => {
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:553',message:'form onSubmit triggered',data:{newFeatureInputLength:newFeatureInput?.length,hasRefineResult:!!refineResult,readyToCompile:refineResult?.ready_to_compile},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
                 e.preventDefault();
                 if (refineResult && refineResult.ready_to_compile) {
                   handleSubmitRefined();
@@ -577,7 +647,12 @@ const App = () => {
                   )}
                   <textarea
                     value={newFeatureInput}
-                    onChange={(e) => setNewFeatureInput(e.target.value)}
+                    onChange={(e) => {
+                      // #region agent log
+                      fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:580',message:'textarea onChange',data:{newValueLength:e.target.value?.length,newValuePreview:e.target.value?.substring(0,30)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                      // #endregion
+                      setNewFeatureInput(e.target.value);
+                    }}
                     placeholder="描述你想实现的功能，例如：我想做一个健身网站"
                     rows={6}
                     disabled={loading || isRecording || refineLoading || isDisabled}
@@ -625,6 +700,9 @@ const App = () => {
 
               {/* Refinement Result Display */}
               {refineResult && (() => {
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:627',message:'Rendering refineResult',data:{hasRefineResult:!!refineResult,readyToCompile:refineResult?.ready_to_compile,currentView},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
                 // Determine which data to display based on currentView
                 let displayData = refineResult;
                 
@@ -641,15 +719,35 @@ const App = () => {
                   }
                 }
                 
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/e4f07afd-e2d6-4325-b413-c366657f19d5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:694',message:'Display data prepared',data:{hasUnderstandingSummary:!!displayData.understanding_summary,understandingSummaryLength:displayData.understanding_summary?.length,understandingSummaryPreview:displayData.understanding_summary?.substring(0,100),hasQuestions:!!displayData.questions,questionsCount:displayData.questions?.length,questions:displayData.questions?.map(q=>({id:q.id,question:q.question?.substring(0,50)})),hasInferredAssumptions:!!displayData.inferred_assumptions,inferredAssumptionsCount:displayData.inferred_assumptions?.length,inferredAssumptions:displayData.inferred_assumptions?.map(a=>a.substring(0,50)),round:displayData.round,readyToCompile:displayData.ready_to_compile},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                
                 return (
-                  <div className="clarification-content">
+                  <div className="clarification-content" style={{ marginTop: '20px', width: '100%', display: 'flex', gap: '20px' }}>
                     {/* Main Content Area */}
-                    <div className="clarification-main" style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <div className="clarification-main" style={{ flex: 1, padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '2px solid var(--accent)', width: '100%', minHeight: '200px' }}>
+                      {/* Update indicator */}
+                      <div style={{ padding: '12px', background: 'rgba(44, 107, 237, 0.4)', borderRadius: '6px', marginBottom: '15px', border: '2px solid var(--accent)', color: '#fff', fontWeight: 'bold', fontSize: '0.95rem', boxShadow: '0 0 10px rgba(44, 107, 237, 0.5)' }}>
+                        <div style={{ marginBottom: '8px' }}>✓ 第 {displayData.round} 轮分析结果</div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 'normal', opacity: 0.9 }}>
+                          {displayData.questions && displayData.questions.length > 0 && (
+                            <div>• 需要回答 {displayData.questions.length} 个问题</div>
+                          )}
+                          {displayData.inferred_assumptions && displayData.inferred_assumptions.length > 0 && (
+                            <div>• 推断出 {displayData.inferred_assumptions.length} 个假设</div>
+                          )}
+                          {displayData.ready_to_compile && (
+                            <div style={{ color: '#10b981', marginTop: '4px' }}>• ✓ 可以开始创建功能</div>
+                          )}
+                        </div>
+                      </div>
+                      
                       {/* Changes Highlight */}
                       {currentView === 'current' && refineResult.changes && <GenomeChanges changes={refineResult.changes} />}
                       
                       {/* Understanding Summary */}
-                      <div style={{ marginBottom: '20px' }}>
+                      <div style={{ marginBottom: '20px', width: '100%' }}>
                         <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span>
                             <Lightbulb size={14} style={{ marginRight: '6px', display: 'inline' }} />
@@ -659,20 +757,27 @@ const App = () => {
                             第 {displayData.round} 轮
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#ccc', whiteSpace: 'pre-wrap' }}>
-                          <ReactMarkdown>{displayData.understanding_summary}</ReactMarkdown>
+                        <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: '#fff', whiteSpace: 'pre-wrap', minHeight: '40px', padding: '12px', background: 'rgba(0,0,0,0.4)', borderRadius: '6px', border: '1px solid rgba(44, 107, 237, 0.5)' }}>
+                          {displayData.understanding_summary ? (
+                            <div style={{ color: '#fff' }}>
+                              <ReactMarkdown>{displayData.understanding_summary}</ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div style={{ color: '#888', fontStyle: 'italic' }}>暂无需求理解内容</div>
+                          )}
                         </div>
                       </div>
 
                       {/* Inferred Assumptions */}
                       {currentView === 'current' && displayData.inferred_assumptions && displayData.inferred_assumptions.length > 0 && (
-                        <div style={{ marginBottom: '20px' }}>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '8px', fontWeight: 600 }}>
-                            推断的假设
+                        <div style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255, 170, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(255, 170, 68, 0.3)' }}>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--exploration)', marginBottom: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Lightbulb size={14} />
+                            推断的假设 ({displayData.inferred_assumptions.length})
                           </div>
-                          <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#aaa' }}>
+                          <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem', color: '#fff', lineHeight: '1.8' }}>
                             {displayData.inferred_assumptions.map((assumption, i) => (
-                              <li key={i}>{assumption}</li>
+                              <li key={i} style={{ marginBottom: '8px' }}>{assumption}</li>
                             ))}
                           </ul>
                         </div>
@@ -680,23 +785,23 @@ const App = () => {
 
                       {/* Questions */}
                       {currentView === 'current' && displayData.questions && displayData.questions.length > 0 && (
-                        <div style={{ marginBottom: '20px' }}>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginBottom: '12px', fontWeight: 600 }}>
-                            <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                        <div style={{ marginBottom: '20px', padding: '15px', background: 'rgba(255, 170, 68, 0.15)', borderRadius: '8px', border: '2px solid rgba(255, 170, 68, 0.4)' }}>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--exploration)', marginBottom: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <HelpCircle size={16} />
                             需要澄清的问题 ({displayData.questions.length})
                           </div>
                           {displayData.questions.map((q, i) => (
-                            <div key={q.id || i} style={{ marginBottom: '16px', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                              <div style={{ fontSize: '0.9rem', fontWeight: 500, marginBottom: '6px', color: '#fff' }}>
-                                {q.question}
+                            <div key={q.id || i} style={{ marginBottom: '16px', padding: '15px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', border: '1px solid rgba(255, 170, 68, 0.3)' }}>
+                              <div style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '8px', color: '#fff' }}>
+                                {i + 1}. {q.question}
                               </div>
                               {q.why_asking && (
-                                <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '8px', paddingLeft: '20px', fontStyle: 'italic' }}>
                                   为什么需要：{q.why_asking}
                                 </div>
                               )}
                               {q.suggestions && q.suggestions.length > 0 && (
-                                <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: '10px', paddingLeft: '20px' }}>
                                   建议：{q.suggestions.join('、')}
                                 </div>
                               )}
@@ -704,9 +809,9 @@ const App = () => {
                                 value={refineAnswers[q.id] || ''}
                                 onChange={(e) => setRefineAnswers({...refineAnswers, [q.id]: e.target.value})}
                                 placeholder="请输入你的回答..."
-                                rows={2}
+                                rows={3}
                                 disabled={refineLoading || loading || isDisabled}
-                                style={{ width: '100%', padding: '8px', fontSize: '0.85rem', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
+                                style={{ width: '100%', padding: '10px', fontSize: '0.9rem', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--border)', borderRadius: '6px', color: '#fff' }}
                               />
                             </div>
                           ))}
@@ -721,6 +826,56 @@ const App = () => {
                             需求已足够清晰，可以开始创建功能
                           </div>
                         </div>
+                      )}
+                      
+                      {/* Limit Reached Indicator */}
+                      {currentView === 'current' && refineResult && refineResult.genome && (
+                        (() => {
+                          const round = refineResult.genome.round || refineResult.round || 0;
+                          const totalQuestions = refineResult.genome.history?.reduce((sum, h) => sum + (h.questions_asked?.length || 0), 0) || 0;
+                          const currentQuestions = refineResult.questions?.length || 0;
+                          const MAX_ROUNDS = 5;
+                          const MAX_TOTAL_QUESTIONS = 10;
+                          const isAtLimit = round >= MAX_ROUNDS || (totalQuestions + currentQuestions) >= MAX_TOTAL_QUESTIONS;
+                          const limitReason = round >= MAX_ROUNDS 
+                            ? `已达到最大轮次限制（${MAX_ROUNDS}轮）`
+                            : (totalQuestions + currentQuestions) >= MAX_TOTAL_QUESTIONS
+                            ? `已达到最大问题数限制（${MAX_TOTAL_QUESTIONS}个）`
+                            : null;
+                          
+                          // Check if ready_to_compile was forced by limit (check understanding_summary for limit message)
+                          const summaryHasLimit = refineResult.understanding_summary?.includes('限制') || refineResult.understanding_summary?.includes('⚠️');
+                          const isLimitForced = isAtLimit && (summaryHasLimit || refineResult.ready_to_compile);
+                          
+                          if (isLimitForced && !bypassLimit) {
+                            return (
+                              <div style={{ padding: '12px', background: 'rgba(255, 170, 68, 0.15)', borderRadius: '8px', border: '1px solid rgba(255, 170, 68, 0.4)', marginTop: '16px' }}>
+                                <div style={{ fontSize: '0.85rem', color: '#ffaa44', fontWeight: 500, marginBottom: '8px' }}>
+                                  <HelpCircle size={14} style={{ marginRight: '6px', display: 'inline' }} />
+                                  {limitReason}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '10px' }}>
+                                  建议进入编译阶段，或继续澄清以获取更多信息。
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button
+                                    onClick={() => setBypassLimit(true)}
+                                    style={{ padding: '6px 12px', background: 'rgba(255, 170, 68, 0.2)', border: '1px solid rgba(255, 170, 68, 0.4)', borderRadius: '6px', color: '#ffaa44', cursor: 'pointer', fontSize: '0.8rem' }}
+                                  >
+                                    继续澄清
+                                  </button>
+                                  <button
+                                    onClick={handleSubmitRefined}
+                                    style={{ padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
+                                  >
+                                    进入编译
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()
                       )}
                     </div>
                     
@@ -766,6 +921,7 @@ const App = () => {
                       // 只在成功时才清空答案，失败时保留用户输入
                       if (success) {
                         setRefineAnswers({});
+                        setBypassLimit(false); // Reset bypass flag after successful feedback
                       }
                     }}
                     disabled={refineLoading || Object.keys(refineAnswers).length === 0 || isDisabled}
@@ -774,20 +930,20 @@ const App = () => {
                     {refineLoading ? '分析中...' : '提交回答并继续细化'}
                   </button>
                 )}
-                <button 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (refineResult && refineResult.ready_to_compile) {
+                {refineResult && refineResult.ready_to_compile && (
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       handleSubmitRefined();
-                    } else {
-                      handleRefine();
-                    }
-                  }}
-                  disabled={loading || refineLoading || (!clarifyingFeatureId && !newFeatureInput.trim()) || isDisabled}
-                  style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
-                >
-                  {loading ? '创建中...' : refineResult && refineResult.ready_to_compile ? '创建功能' : '开始分析'}
-                </button>
+                    }}
+                    disabled={loading || refineLoading || isDisabled}
+                    style={{ padding: '10px 20px', background: 'var(--accent)', border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
+                  >
+                    {loading ? '创建中...' : '创建功能'}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -858,7 +1014,7 @@ const App = () => {
                         {feature.title || '未命名功能'}
                       </h3>
                       <p className="feature-description">
-                        {feature.spec?.feature?.goal || '点击查看详情'}
+                        {feature.spec?.spec?.goal || '点击查看详情'}
                       </p>
                       {feature.status === 'clarifying' && (
                         <div className="clarifying-indicator">
@@ -1053,6 +1209,8 @@ const FeatureDetailView = ({ featureId, onBack }) => {
   const [clarifyQuestions, setClarifyQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [generatingDoc, setGeneratingDoc] = useState(false);
   
   // 当后端不健康时，禁用所有操作
   const isDisabled = isHealthy === false;
@@ -1126,6 +1284,77 @@ const FeatureDetailView = ({ featureId, onBack }) => {
     }
   };
 
+  const handleGenerateDocument = async () => {
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法生成文档');
+      return;
+    }
+    
+    setGeneratingDoc(true);
+    try {
+      const res = await fetch(`/api/v1/features/${featureId}/document`, {
+        method: 'GET',
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${featureId}_spec.md`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        const error = await res.json();
+        alert(`生成文档失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to generate document:', err);
+      alert('生成文档失败，请重试');
+    } finally {
+      setGeneratingDoc(false);
+    }
+  };
+
+  const handlePublishToFeishu = async () => {
+    if (isHealthy === false) {
+      alert('后端服务不可用，无法同步到飞书');
+      return;
+    }
+    
+    if (feature?.status !== 'executable_ready') {
+      alert('功能状态必须是 executable_ready 才能发布到飞书');
+      return;
+    }
+    
+    if (!confirm('确定要同步到飞书多维表格吗？')) {
+      return;
+    }
+    
+    setPublishing(true);
+    try {
+      const res = await fetch(`/api/v1/features/${featureId}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`同步成功！\n操作: ${data.operation}\n外部ID: ${data.external_id}\n${data.message}`);
+        // Refresh feature data
+        fetchFeatureDetails();
+      } else {
+        const error = await res.json();
+        alert(`同步失败: ${error.detail || '未知错误'}`);
+      }
+    } catch (err) {
+      console.error('Failed to publish to Feishu:', err);
+      alert('同步到飞书失败，请重试');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -1163,6 +1392,44 @@ const FeatureDetailView = ({ featureId, onBack }) => {
             {feature.status}
           </span>
         </div>
+        <div className="feature-actions" style={{ display: 'flex', gap: '10px', marginLeft: 'auto' }}>
+          <button
+            className="btn-action"
+            onClick={handleGenerateDocument}
+            disabled={isDisabled || generatingDoc}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: isDisabled || generatingDoc ? 'not-allowed' : 'pointer',
+              opacity: isDisabled || generatingDoc ? 0.5 : 1,
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+          >
+            {generatingDoc ? '生成中...' : '生成文档'}
+          </button>
+          <button
+            className="btn-action"
+            onClick={handlePublishToFeishu}
+            disabled={isDisabled || publishing || feature?.status !== 'executable_ready'}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: feature?.status === 'executable_ready' ? '#10b981' : '#888',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: (isDisabled || publishing || feature?.status !== 'executable_ready') ? 'not-allowed' : 'pointer',
+              opacity: (isDisabled || publishing || feature?.status !== 'executable_ready') ? 0.5 : 1,
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+          >
+            {publishing ? '同步中...' : '同步到飞书'}
+          </button>
+        </div>
       </div>
 
       <div className="detail-content">
@@ -1185,13 +1452,13 @@ const FeatureDetailView = ({ featureId, onBack }) => {
               <div className="spec-content">
                 <div className="spec-item">
                   <strong>目标：</strong>
-                  <p>{spec.feature?.goal}</p>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{spec.spec?.goal || '暂无'}</p>
                 </div>
-                {spec.feature?.non_goals && spec.feature.non_goals.length > 0 && (
+                {spec.spec?.non_goals && spec.spec.non_goals.length > 0 && (
                   <div className="spec-item">
                     <strong>非目标：</strong>
                     <ul>
-                      {spec.feature.non_goals.map((goal, i) => (
+                      {spec.spec.non_goals.map((goal, i) => (
                         <li key={i}>{goal}</li>
                       ))}
                     </ul>

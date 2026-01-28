@@ -456,11 +456,21 @@ header {
   gap: 12px;
 }
 
+.feature-title-section {
+  flex: 1;
+}
+
 .feature-title-section h1 {
   font-size: 1.5rem;
   font-weight: 600;
   margin: 0;
   color: var(--text-main);
+}
+
+.feature-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .detail-content {

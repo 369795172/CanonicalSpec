@@ -132,6 +132,8 @@ class Planning(BaseModel):
     mvp_definition: Optional[MVPDefinition] = Field(None, description="MVP definition")
     tasks: List[Task] = Field(default_factory=list, description="List of tasks")
     vv: List[VV] = Field(default_factory=list, description="List of V&V items")
+    known_assumptions: List[str] = Field(default_factory=list, description="Known assumptions from requirement genome")
+    constraints: List[str] = Field(default_factory=list, description="Constraints from requirement genome")
 
 
 class MissingField(BaseModel):

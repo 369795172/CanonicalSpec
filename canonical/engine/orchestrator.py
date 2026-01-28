@@ -111,7 +111,7 @@ class Orchestrator:
         # Step 2: Compile (use draft_spec from refine_result if available)
         if refine_result and refine_result.ready_to_compile and refine_result.draft_spec:
             # Use refined draft spec
-            spec = self._step_compile_from_draft(ingest_result, refine_result.draft_spec)
+            spec = self._step_compile_from_draft(ingest_result, refine_result.draft_spec, refine_result)
         else:
             # Normal compilation
             spec = self._step_compile(ingest_result)
@@ -542,6 +542,7 @@ class Orchestrator:
         self,
         ingest_result: Dict[str, Any],
         draft_spec: Dict[str, Any],
+        refine_result: Optional[RefineResult] = None,
     ) -> CanonicalSpec:
         """Execute the compile step using draft spec from refinement."""
         self._step_seq += 1
@@ -580,6 +581,40 @@ class Orchestrator:
                     criteria=ac_data,
                 ))
         
+        # Extract goal and non_goals from draft_spec
+        goal = draft_spec.get("goal", "")
+        non_goals = draft_spec.get("non_goals", [])
+        
+        # If goal is empty or non_goals is empty, try to get from genome
+        if refine_result and refine_result.genome:
+            # Use genome goals if draft_spec goal is empty
+            if not goal and refine_result.genome.goals:
+                # Combine all goals if multiple, or use first one
+                if len(refine_result.genome.goals) == 1:
+                    goal = refine_result.genome.goals[0]
+                else:
+                    # Join multiple goals with newlines or semicolons
+                    goal = "\n".join(refine_result.genome.goals)
+            
+            # Use genome non_goals if draft_spec non_goals is empty
+            if not non_goals and refine_result.genome.non_goals:
+                non_goals = refine_result.genome.non_goals
+        
+        # Create planning with assumptions and constraints from genome
+        planning = Planning()
+        if refine_result and refine_result.genome:
+            # Extract assumptions
+            if refine_result.genome.assumptions:
+                planning.known_assumptions = [
+                    a.content for a in refine_result.genome.assumptions
+                ]
+            
+            # Extract constraints
+            if refine_result.genome.constraints:
+                planning.constraints = [
+                    c.content for c in refine_result.genome.constraints
+                ]
+        
         # Create spec
         spec = CanonicalSpec(
             feature=Feature(
@@ -588,11 +623,11 @@ class Orchestrator:
                 status=FeatureStatus.DRAFT,
             ),
             spec=Spec(
-                goal=draft_spec.get("goal", ""),
-                non_goals=draft_spec.get("non_goals", []),
+                goal=goal,
+                non_goals=non_goals,
                 acceptance_criteria=acceptance_criteria,
             ),
-            planning=Planning(),
+            planning=planning,
             quality=Quality(),
             decision=Decision(),
             meta=Meta(),
