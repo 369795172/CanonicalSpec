@@ -116,7 +116,7 @@ class MappingConfig:
                     "feishu_field": "所属项目",
                     "spec_path": "project_context_ref.project_record_id",
                     "transform": "direct",
-                    "required": True,
+                    "required": False,
                 },
             ],
         }
@@ -390,10 +390,6 @@ class FeishuPublisher:
             raise ValueError(
                 f"Spec 状态必须是 executable_ready，当前状态: {spec.feature.status}"
             )
-        
-        # Validate required fields
-        if not spec.project_context_ref or not spec.project_context_ref.project_record_id:
-            raise ValueError("project_context_ref.project_record_id 是发布必填字段")
         
         # Map fields
         feishu_fields, field_map_snapshot = self._map_fields(spec)

@@ -513,7 +513,7 @@ async def publish_feature(feature_id: str):
     Requires:
     - Feature status must be executable_ready
     - Feishu credentials configured (CANONICAL_FEISHU_APP_ID, CANONICAL_FEISHU_APP_SECRET)
-    - project_context_ref.project_record_id must be set in spec
+    - project_context_ref.project_record_id is optional (if not set, 所属项目 field will be empty)
     """
     try:
         # Load spec
