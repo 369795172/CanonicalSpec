@@ -535,11 +535,18 @@ class LLMCompiler:
             task_id = v_data.get("task_id", "")
             if task_id and (not task_id.startswith("T-") or not task_id[2:].isdigit()):
                 task_id = ""  # Will be validated by VV model
-            
+
+            # Validate VV type - fallback to manual if LLM returns invalid type (e.g. "test")
+            raw_type = v_data.get("type", "manual")
+            try:
+                vv_type = VVType(raw_type)
+            except ValueError:
+                vv_type = VVType.MANUAL
+
             vv = VV(
                 vv_id=vv_id,
                 task_id=task_id,
-                type=VVType(v_data.get("type", "manual")),
+                type=vv_type,
                 procedure=v_data.get("procedure", ""),
                 expected_result=v_data.get("expected_result", ""),
                 evidence_required=evidence,
