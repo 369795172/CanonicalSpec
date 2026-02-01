@@ -454,7 +454,10 @@ class Orchestrator:
                     c.content for c in refine_result.genome.constraints
                 ]
         
-        # Save updated spec
+        # Clear spec_version to generate a new version when saving
+        spec.meta.spec_version = None
+        
+        # Save updated spec (will generate new version automatically)
         new_version = self.spec_store.save(spec)
         updated_spec = self.spec_store.load(feature_id, new_version)
         

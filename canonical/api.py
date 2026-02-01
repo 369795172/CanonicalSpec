@@ -5,7 +5,7 @@ FastAPI server for canonical frontend
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from typing import List, Optional
 import json
 from pathlib import Path
@@ -471,6 +471,254 @@ async def compile_refined_feature(feature_id: str, body: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/features/{feature_id}/document")
+async def generate_feature_document(feature_id: str):
+    """
+    Generate a Markdown document for a feature spec.
+    
+    Returns the Canonical Spec formatted as a Markdown document.
+    """
+    try:
+        # Load the spec
+        spec = spec_store.load(feature_id)
+        if not spec:
+            raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
+        
+        # Generate Markdown document
+        markdown_content = _format_spec_as_markdown(spec)
+        
+        # Return as Markdown file
+        return Response(
+            content=markdown_content,
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f'attachment; filename="{feature_id}_spec.md"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate document: {str(e)}")
+
+
+def _format_spec_as_markdown(spec: CanonicalSpec) -> str:
+    """
+    Format a CanonicalSpec as a Markdown document following the Canonical Spec MVP Schema.
+    
+    This follows the structure defined in docs/mvp_contracts/01_canonical_spec_mvp_schema.md
+    """
+    lines = []
+    
+    # Header - Feature Metadata
+    lines.append(f"# {spec.feature.title or spec.feature.feature_id}")
+    lines.append("")
+    lines.append("## Feature Metadata")
+    lines.append("")
+    lines.append(f"- **Feature ID**: `{spec.feature.feature_id}`")
+    lines.append(f"- **Title**: {spec.feature.title or '*No title*'}")
+    lines.append(f"- **Status**: `{spec.feature.status.value}`")
+    lines.append(f"- **Schema Version**: `{spec.schema_version}`")
+    lines.append(f"- **Spec Version**: `{spec.meta.spec_version or 'N/A'}`")
+    lines.append(f"- **Created**: {spec.feature.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append(f"- **Updated**: {spec.feature.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append("")
+    
+    # Project Context Reference
+    if spec.project_context_ref:
+        ctx = spec.project_context_ref
+        if ctx.project_id or ctx.project_record_id or ctx.mentor_user_id or ctx.intern_user_id:
+            lines.append("## Project Context Reference")
+            lines.append("")
+            if ctx.project_id:
+                lines.append(f"- **Project ID**: `{ctx.project_id}`")
+            if ctx.context_version:
+                lines.append(f"- **Context Version**: `{ctx.context_version}`")
+            if ctx.project_record_id:
+                lines.append(f"- **Project Record ID**: `{ctx.project_record_id}`")
+            if ctx.mentor_user_id:
+                lines.append(f"- **Mentor User ID**: `{ctx.mentor_user_id}`")
+            if ctx.intern_user_id:
+                lines.append(f"- **Intern User ID**: `{ctx.intern_user_id}`")
+            lines.append("")
+    
+    # Spec Section
+    lines.append("## Spec")
+    lines.append("")
+    
+    # Goal (Required)
+    lines.append("### Goal")
+    lines.append("")
+    if spec.spec.goal:
+        lines.append(spec.spec.goal)
+    else:
+        lines.append("*No goal specified*")
+    lines.append("")
+    
+    # Background (Optional)
+    if spec.spec.background:
+        lines.append("### Background")
+        lines.append("")
+        lines.append(spec.spec.background)
+        lines.append("")
+    
+    # Non-Goals (Required, but can be empty array)
+    lines.append("### Non-Goals")
+    lines.append("")
+    if spec.spec.non_goals:
+        for non_goal in spec.spec.non_goals:
+            lines.append(f"- {non_goal}")
+    else:
+        lines.append("*None specified*")
+    lines.append("")
+    
+    # Acceptance Criteria (Required)
+    lines.append("### Acceptance Criteria")
+    lines.append("")
+    if spec.spec.acceptance_criteria:
+        for ac in spec.spec.acceptance_criteria:
+            lines.append(f"#### {ac.id}")
+            lines.append("")
+            lines.append(f"**Criteria**: {ac.criteria}")
+            if ac.test_hint:
+                lines.append("")
+                lines.append(f"**Test Hint**: {ac.test_hint}")
+            lines.append("")
+    else:
+        lines.append("*No acceptance criteria specified*")
+        lines.append("")
+    
+    # Planning Section
+    lines.append("## Planning")
+    lines.append("")
+    
+    # MVP Definition (Optional)
+    if spec.planning and spec.planning.mvp_definition:
+        mvp = spec.planning.mvp_definition
+        lines.append("### MVP Definition")
+        lines.append("")
+        if mvp.mvp_goal:
+            lines.append(f"**MVP Goal**: {mvp.mvp_goal}")
+            lines.append("")
+        if mvp.mvp_cut_lines:
+            lines.append("**MVP Cut Lines**:")
+            lines.append("")
+            for cut_line in mvp.mvp_cut_lines:
+                lines.append(f"- {cut_line}")
+            lines.append("")
+        if mvp.mvp_risks:
+            lines.append("**MVP Risks**:")
+            lines.append("")
+            for risk in mvp.mvp_risks:
+                lines.append(f"- {risk}")
+            lines.append("")
+    
+    # Known Assumptions
+    if spec.planning and spec.planning.known_assumptions:
+        lines.append("### Known Assumptions")
+        lines.append("")
+        for assumption in spec.planning.known_assumptions:
+            lines.append(f"- {assumption}")
+        lines.append("")
+    
+    # Constraints
+    if spec.planning and spec.planning.constraints:
+        lines.append("### Constraints")
+        lines.append("")
+        for constraint in spec.planning.constraints:
+            lines.append(f"- {constraint}")
+        lines.append("")
+    
+    # Tasks
+    if spec.planning:
+        lines.append("### Tasks")
+        lines.append("")
+        if spec.planning.tasks:
+            for task in spec.planning.tasks:
+                lines.append(f"#### {task.task_id}: {task.title}")
+                lines.append("")
+                lines.append(f"- **Type**: `{task.type.value}`")
+                lines.append(f"- **Scope**: {task.scope}")
+                if task.owner_role:
+                    lines.append(f"- **Owner Role**: `{task.owner_role}`")
+                if task.estimate:
+                    lines.append(f"- **Estimate**: {task.estimate.value} {task.estimate.unit}(s)")
+                if task.deliverables:
+                    lines.append("- **Deliverables**:")
+                    for deliverable in task.deliverables:
+                        lines.append(f"  - {deliverable}")
+                if task.dependencies:
+                    lines.append(f"- **Dependencies**: {', '.join(task.dependencies)}")
+                if task.affected_components:
+                    lines.append("- **Affected Components**:")
+                    for component in task.affected_components:
+                        lines.append(f"  - {component}")
+                lines.append("")
+        else:
+            lines.append("*No tasks specified*")
+            lines.append("")
+        
+        # V&V Items
+        lines.append("### Verification & Validation")
+        lines.append("")
+        if spec.planning.vv:
+            for vv in spec.planning.vv:
+                lines.append(f"#### {vv.vv_id} (for {vv.task_id})")
+                lines.append("")
+                lines.append(f"- **Type**: `{vv.type.value}`")
+                lines.append(f"- **Procedure**: {vv.procedure}")
+                lines.append(f"- **Expected Result**: {vv.expected_result}")
+                if vv.evidence_required:
+                    lines.append("- **Evidence Required**:")
+                    for evidence in vv.evidence_required:
+                        lines.append(f"  - {evidence}")
+                lines.append("")
+        else:
+            lines.append("*No V&V items specified*")
+            lines.append("")
+    
+    # Quality Assessment
+    lines.append("## Quality Assessment")
+    lines.append("")
+    lines.append(f"- **Completeness Score**: {spec.quality.completeness_score:.2%}")
+    if spec.quality.missing_fields:
+        lines.append("- **Missing Fields**:")
+        for field in spec.quality.missing_fields:
+            lines.append(f"  - **{field.path}**: {field.reason}")
+    else:
+        lines.append("- **Missing Fields**: *None*")
+    lines.append("")
+    
+    # Decision
+    lines.append("## Decision")
+    lines.append("")
+    lines.append(f"- **Recommendation**: `{spec.decision.recommendation}`")
+    if spec.decision.rationale:
+        lines.append("- **Rationale**:")
+        for reason in spec.decision.rationale:
+            lines.append(f"  - {reason}")
+    else:
+        lines.append("- **Rationale**: *None provided*")
+    lines.append("")
+    
+    # Metadata
+    lines.append("## Metadata")
+    lines.append("")
+    lines.append(f"- **Spec Version**: `{spec.meta.spec_version or 'N/A'}`")
+    if spec.meta.source_artifacts:
+        lines.append("- **Source Artifacts**:")
+        for artifact in spec.meta.source_artifacts:
+            lines.append(f"  - **{artifact.type.value}**: {artifact.ref}")
+    else:
+        lines.append("- **Source Artifacts**: *None*")
+    if spec.meta.extensions:
+        lines.append(f"- **Extensions**: {len(spec.meta.extensions)} extension(s)")
+    lines.append("")
+    
+    return "\n".join(lines)
 
 
 @app.post("/api/v1/transcribe")

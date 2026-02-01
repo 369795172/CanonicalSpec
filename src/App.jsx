@@ -1295,23 +1295,55 @@ const FeatureDetailView = ({ featureId, onBack }) => {
       const res = await fetch(`/api/v1/features/${featureId}/document`, {
         method: 'GET',
       });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${featureId}_spec.md`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        const error = await res.json();
+      
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ detail: '未知错误' }));
         alert(`生成文档失败: ${error.detail || '未知错误'}`);
+        return;
       }
+      
+      // Get filename from Content-Disposition header or use default
+      const contentDisposition = res.headers.get('Content-Disposition');
+      let filename = `${featureId}_spec.md`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+      
+      // Get blob data
+      const blob = await res.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.style.display = 'none';
+      
+      // Append to body and trigger click
+      document.body.appendChild(a);
+      
+      // Use setTimeout to ensure the element is in the DOM
+      setTimeout(() => {
+        a.click();
+        
+        // Clean up after download starts
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }, 100);
+      }, 0);
+      
+      // Show success message
+      setTimeout(() => {
+        alert(`文档已开始下载！\n\n文件名：${filename}\n文件将保存到浏览器的默认下载位置（通常是 ~/Downloads 文件夹）。`);
+      }, 200);
+      
     } catch (err) {
       console.error('Failed to generate document:', err);
-      alert('生成文档失败，请重试');
+      alert(`生成文档失败: ${err.message || '请重试'}`);
     } finally {
       setGeneratingDoc(false);
     }

@@ -9,6 +9,19 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        // Ensure headers are forwarded correctly
+        headers: {
+          'Connection': 'keep-alive',
+        },
+        // Configure proxy to preserve response headers
+        configure: (proxy, _options) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
+            // Forward all headers from backend response
+            Object.keys(proxyRes.headers).forEach((key) => {
+              res.setHeader(key, proxyRes.headers[key]);
+            });
+          });
+        },
       },
     },
   },
