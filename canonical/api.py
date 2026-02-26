@@ -17,6 +17,7 @@ from canonical.engine.orchestrator import Orchestrator
 from canonical.engine.refiner import RequirementRefiner
 from canonical.store.spec_store import SpecStore
 from canonical.services.ai_client import AIClient
+from canonical.adapters.feishu import FeishuReader
 
 app = FastAPI(
     title="Canonical Spec API",
@@ -719,6 +720,62 @@ def _format_spec_as_markdown(spec: CanonicalSpec) -> str:
     lines.append("")
     
     return "\n".join(lines)
+
+
+@app.post("/api/v1/feishu/read")
+async def feishu_read(body: dict):
+    """
+    Read Feishu document content.
+
+    Request body:
+    {
+        "url": "https://xxx.feishu.cn/docx/XXXX" (optional),
+        "document_token": "document_id" (optional),
+        "wiki_token": "node_token" (optional, requires wiki_space_id),
+        "wiki_space_id": "space_id" (optional, required when wiki_token)
+
+    At least one of: url, document_token, or (wiki_token + wiki_space_id).
+    """
+    try:
+        url = body.get("url")
+        document_token = body.get("document_token")
+        wiki_token = body.get("wiki_token")
+        wiki_space_id = body.get("wiki_space_id")
+
+        if not url and not document_token and not (wiki_token and wiki_space_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide at least one of: url, document_token, or (wiki_token + wiki_space_id)",
+            )
+
+        reader = FeishuReader()
+        result = reader.read(
+            url=url,
+            document_token=document_token,
+            wiki_token=wiki_token,
+            wiki_space_id=wiki_space_id,
+        )
+
+        if result.get("debug"):
+            code = result["debug"].get("code", 500)
+            msg = result["debug"].get("msg", "Unknown error")
+            if code == 403:
+                raise HTTPException(status_code=403, detail=msg)
+            if code == 404:
+                raise HTTPException(status_code=404, detail=msg)
+            if code == 429:
+                raise HTTPException(status_code=429, detail=msg)
+            raise HTTPException(status_code=502, detail=msg)
+
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/transcribe")

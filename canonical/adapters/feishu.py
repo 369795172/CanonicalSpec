@@ -2,19 +2,33 @@
 Feishu Publisher - Adapter for publishing specs to Feishu (Lark Base).
 
 Implements the publish contract from 04_feishu_publish_contract.md.
+
+Also provides FeishuReader for reading doc/wiki content.
 """
 
 import json
+import re
 import yaml
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from jinja2 import Template
 import requests
 
 from canonical.models.spec import CanonicalSpec, FeatureStatus
 from canonical.store.ledger import Ledger, LedgerRecord, LedgerStatus
 from canonical.config import config
+
+
+@dataclass
+class FeishuReadError:
+    """Unified error structure for read failures."""
+
+    endpoint: str
+    code: int
+    msg: str
+    request_id: Optional[str] = None
 
 
 class MappingConfig:
@@ -102,7 +116,7 @@ class MappingConfig:
                     "feishu_field": "优先级",
                     "spec_path": None,
                     "transform": "fixed",
-                    "fixed_value": "中",
+                    "fixed_value": "高",
                     "required": True,
                 },
                 {
@@ -116,7 +130,7 @@ class MappingConfig:
                     "feishu_field": "所属项目",
                     "spec_path": "project_context_ref.project_record_id",
                     "transform": "direct",
-                    "required": False,
+                    "required": True,
                 },
             ],
         }
@@ -323,6 +337,322 @@ class FeishuClient:
         
         return data["data"]["record"]
 
+    def _request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[FeishuReadError]]:
+        """
+        Execute request with timeout/retry and return (data, error).
+        On success: (data, None). On failure: (None, FeishuReadError).
+        """
+        timeout = getattr(config, "feishu_timeout", 30) or 30
+        retry_count = getattr(config, "feishu_retry", 3) or 0
+        last_error = None
+
+        for attempt in range(retry_count + 1):
+            try:
+                resp = requests.request(
+                    method,
+                    url,
+                    headers=self._headers(),
+                    timeout=timeout,
+                    **kwargs,
+                )
+                data = resp.json() if resp.content else {}
+                request_id = resp.headers.get("X-Request-Id") or data.get("request_id")
+
+                if resp.status_code == 429:
+                    last_error = FeishuReadError(
+                        endpoint=url,
+                        code=429,
+                        msg=data.get("msg", "Rate limited"),
+                        request_id=request_id,
+                    )
+                    continue
+
+                if resp.status_code >= 400:
+                    last_error = FeishuReadError(
+                        endpoint=url,
+                        code=data.get("code", resp.status_code),
+                        msg=data.get("msg", resp.reason or f"HTTP {resp.status_code}"),
+                        request_id=request_id,
+                    )
+                    return (None, last_error)
+
+                if data.get("code", 0) != 0:
+                    last_error = FeishuReadError(
+                        endpoint=url,
+                        code=data.get("code", -1),
+                        msg=data.get("msg", "Unknown API error"),
+                        request_id=request_id,
+                    )
+                    return (None, last_error)
+
+                return (data, None)
+
+            except requests.exceptions.Timeout as e:
+                last_error = FeishuReadError(
+                    endpoint=url,
+                    code=-1,
+                    msg=f"Timeout: {str(e)}",
+                )
+            except requests.exceptions.RequestException as e:
+                last_error = FeishuReadError(
+                    endpoint=url,
+                    code=-1,
+                    msg=str(e),
+                )
+                break
+
+        return (None, last_error)
+
+    def get_doc_metadata(self, document_id: str) -> Tuple[Optional[Dict[str, Any]], Optional[FeishuReadError]]:
+        """Get document metadata (title, etc.) for docx document."""
+        url = f"{self.BASE_URL}/docx/v1/documents/{document_id}"
+        data, err = self._request("GET", url)
+        if err:
+            return (None, err)
+        return (data.get("data"), None)
+
+    def get_doc_raw_content(self, document_id: str) -> Tuple[Optional[str], Optional[FeishuReadError]]:
+        """Get raw plain text content of docx document."""
+        url = f"{self.BASE_URL}/docx/v1/documents/{document_id}/raw_content"
+        data, err = self._request("GET", url)
+        if err:
+            return (None, err)
+        content = (data or {}).get("data", {}).get("content", "")
+        return (content or "", None)
+
+    def get_wiki_node(self, space_id: str, node_token: str) -> Tuple[Optional[Dict[str, Any]], Optional[FeishuReadError]]:
+        """Get wiki node info by space_id + node_token (space_id must be numeric)."""
+        url = f"{self.BASE_URL}/wiki/v2/spaces/{space_id}/nodes/{node_token}"
+        data, err = self._request("GET", url)
+        if err:
+            return (None, err)
+        return (data.get("data", {}).get("node"), None)
+
+    def get_wiki_node_by_token(self, token: str) -> Tuple[Optional[Dict[str, Any]], Optional[FeishuReadError]]:
+        """Get wiki node info by token only (for single-token wiki URLs)."""
+        url = f"{self.BASE_URL}/wiki/v2/spaces/get_node?token={token}"
+        data, err = self._request("GET", url)
+        if err:
+            return (None, err)
+        return (data.get("data", {}).get("node"), None)
+
+
+def resolve_url_to_token(url: str) -> Tuple[Optional[str], Optional[str], Optional[Tuple[str, str]]]:
+    """
+    Parse Feishu URL to extract document/wiki tokens.
+
+    Returns:
+        (doc_type, token, wiki_ids) where:
+        - doc_type: "docx" | "docs" | "wiki"
+        - token: document_id or doc_token or node_token
+        - wiki_ids: (space_id, node_token) only when doc_type is "wiki"
+    """
+    if not url or not isinstance(url, str):
+        return (None, None, None)
+
+    url = url.strip()
+
+    # docx: https://xxx.feishu.cn/docx/XXXX
+    m = re.search(r"feishu\.cn/docx/([A-Za-z0-9]+)", url)
+    if m:
+        return ("docx", m.group(1), None)
+
+    # docs (old): https://xxx.feishu.cn/docs/XXXX
+    m = re.search(r"feishu\.cn/docs/([A-Za-z0-9]+)", url)
+    if m:
+        return ("docs", m.group(1), None)
+
+    # wiki: https://xxx.feishu.cn/wiki/XXXX or wiki/space_id/node_token
+    m = re.search(r"feishu\.cn/wiki/([A-Za-z0-9]+)(?:/([A-Za-z0-9]+))?", url)
+    if m:
+        space_id = m.group(1)
+        node_token = m.group(2) or m.group(1)
+        if m.group(2):
+            return ("wiki", node_token, (space_id, node_token))
+        return ("wiki", space_id, (space_id, space_id))
+
+    return (None, None, None)
+
+
+def normalize_doc_content(raw: str) -> Dict[str, Any]:
+    """Extract plain_text and blocks from raw content."""
+    plain_text = (raw or "").strip()
+    blocks = []
+    for para in plain_text.split("\n\n"):
+        para = para.strip()
+        if para:
+            blocks.append({"type": "paragraph", "text": para})
+    return {"plain_text": plain_text, "blocks": blocks}
+
+
+class FeishuReader:
+    """Reader for Feishu doc/wiki content. Handles read + normalize only."""
+
+    def __init__(self, client: Optional[FeishuClient] = None):
+        self._client = client
+
+    @property
+    def client(self) -> FeishuClient:
+        if self._client is None:
+            self._client = FeishuClient()
+        return self._client
+
+    def read(
+        self,
+        url: Optional[str] = None,
+        document_token: Optional[str] = None,
+        wiki_token: Optional[str] = None,
+        wiki_space_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Read Feishu document content.
+
+        Args:
+            url: Feishu doc/wiki URL (preferred)
+            document_token: Direct document_id (docx) or doc_token (docs)
+            wiki_token: Wiki node_token (requires wiki_space_id)
+            wiki_space_id: Wiki space_id (required when using wiki_token)
+
+        Returns:
+            {
+                "title": str,
+                "plain_text": str,
+                "blocks": list,
+                "source_url": str,
+                "debug": dict | None (present on error)
+            }
+        """
+        source_url = url or ""
+        debug = None
+
+        # Resolve input to document_id
+        doc_id = None
+        if url:
+            doc_type, token, wiki_ids = resolve_url_to_token(url)
+            if doc_type == "docx":
+                doc_id = token
+            elif doc_type == "docs":
+                doc_id = token
+            elif doc_type == "wiki" and wiki_ids:
+                space_id, node_token = wiki_ids
+                if space_id == node_token or not space_id.isdigit():
+                    node, err = self.client.get_wiki_node_by_token(node_token)
+                else:
+                    node, err = self.client.get_wiki_node(space_id, node_token)
+                if err:
+                    return {
+                        "title": "",
+                        "plain_text": "",
+                        "blocks": [],
+                        "source_url": source_url,
+                        "debug": {
+                            "endpoint": err.endpoint,
+                            "code": err.code,
+                            "msg": err.msg,
+                            "request_id": err.request_id,
+                        },
+                    }
+                if node:
+                    obj_type = node.get("obj_type")
+                    obj_token = node.get("obj_token")
+                    if obj_token and obj_type in ("doc", "docx"):
+                        doc_id = obj_token
+                    else:
+                        return {
+                            "title": node.get("title", ""),
+                            "plain_text": "",
+                            "blocks": [],
+                            "source_url": source_url,
+                            "debug": {
+                                "msg": f"Wiki node obj_type={obj_type} not supported (doc/docx), obj_token={obj_token}",
+                            },
+                        }
+        elif document_token:
+            doc_id = document_token
+        elif wiki_token and wiki_space_id:
+            node, err = self.client.get_wiki_node(wiki_space_id, wiki_token)
+            if err:
+                return {
+                    "title": "",
+                    "plain_text": "",
+                    "blocks": [],
+                    "source_url": source_url,
+                    "debug": {
+                        "endpoint": err.endpoint,
+                        "code": err.code,
+                        "msg": err.msg,
+                        "request_id": err.request_id,
+                    },
+                }
+            if node:
+                obj_type = node.get("obj_type")
+                obj_token = node.get("obj_token")
+                if obj_token and obj_type in ("doc", "docx"):
+                    doc_id = obj_token
+                else:
+                    return {
+                        "title": node.get("title", ""),
+                        "plain_text": "",
+                        "blocks": [],
+                        "source_url": source_url,
+                        "debug": {"msg": f"Wiki node obj_type={obj_type} not supported (doc/docx)"},
+                    }
+
+        if not doc_id:
+            return {
+                "title": "",
+                "plain_text": "",
+                "blocks": [],
+                "source_url": source_url,
+                "debug": {"msg": "No url, document_token, or valid wiki_token+wiki_space_id provided"},
+            }
+
+        # Get metadata (title)
+        meta, err = self.client.get_doc_metadata(doc_id)
+        if err:
+            return {
+                "title": "",
+                "plain_text": "",
+                "blocks": [],
+                "source_url": source_url,
+                "debug": {
+                    "endpoint": err.endpoint,
+                    "code": err.code,
+                    "msg": err.msg,
+                    "request_id": err.request_id,
+                },
+            }
+        title = (meta or {}).get("title", "")
+
+        # Get raw content
+        raw, err = self.client.get_doc_raw_content(doc_id)
+        if err:
+            return {
+                "title": title,
+                "plain_text": "",
+                "blocks": [],
+                "source_url": source_url,
+                "debug": {
+                    "endpoint": err.endpoint,
+                    "code": err.code,
+                    "msg": err.msg,
+                    "request_id": err.request_id,
+                },
+            }
+
+        normalized = normalize_doc_content(raw or "")
+        return {
+            "title": title,
+            "plain_text": normalized["plain_text"],
+            "blocks": normalized["blocks"],
+            "source_url": source_url or f"https://example.feishu.cn/docx/{doc_id}",
+        }
+
 
 class FeishuPublisher:
     """
@@ -390,6 +720,10 @@ class FeishuPublisher:
             raise ValueError(
                 f"Spec 状态必须是 executable_ready，当前状态: {spec.feature.status}"
             )
+        
+        # Validate required fields
+        if not spec.project_context_ref or not spec.project_context_ref.project_record_id:
+            raise ValueError("project_context_ref.project_record_id 是发布必填字段")
         
         # Map fields
         feishu_fields, field_map_snapshot = self._map_fields(spec)

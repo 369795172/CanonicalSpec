@@ -36,6 +36,9 @@ class CanonicalConfig(BaseSettings):
     feishu_app_secret: Optional[str] = Field(None, description="Feishu app secret")
     feishu_base_token: Optional[str] = Field(None, description="Feishu bitable app token")
     feishu_table_id: Optional[str] = Field(None, description="Feishu bitable table ID")
+    feishu_timeout: int = Field(30, ge=1, le=120, description="Feishu API timeout in seconds")
+    feishu_retry: int = Field(3, ge=0, le=10, description="Feishu API retry count")
+    feishu_read_enabled: bool = Field(True, description="Enable Feishu doc/wiki read capability")
     
     # Mapping Configuration
     mapping_config_path: Optional[Path] = Field(None, description="Path to mapping config YAML")

@@ -23,7 +23,7 @@ from canonical.engine.gate import GateEngine
 from canonical.engine.orchestrator import Orchestrator
 from canonical.store.spec_store import SpecStore
 from canonical.store.ledger import Ledger
-from canonical.adapters.feishu import FeishuPublisher
+from canonical.adapters.feishu import FeishuPublisher, FeishuReader
 
 
 def print_gate_result(gate_result: GateResult) -> None:
@@ -288,6 +288,48 @@ def publish(feature_id: str, dry_run: bool):
         
     except ValueError as e:
         click.echo(f"\n✗ 发布失败: {str(e)}", err=True)
+        sys.exit(2)
+
+
+@cli.command()
+@click.option('--url', '-u', help='飞书文档 URL (docx/docs/wiki)')
+@click.option('--document-token', '-d', help='文档 token (document_id)')
+@click.option('--wiki-token', help='Wiki node_token (需配合 --wiki-space-id)')
+@click.option('--wiki-space-id', help='Wiki space_id (需配合 --wiki-token)')
+@click.option('--debug', is_flag=True, help='输出 debug 字段')
+def read_feishu(url: Optional[str], document_token: Optional[str], wiki_token: Optional[str], wiki_space_id: Optional[str], debug: bool):
+    """
+    读取飞书文档内容
+
+    支持 docx/docs/wiki 链接。使用 --url 或 --document-token 或 (--wiki-token + --wiki-space-id)。
+    """
+    if not url and not document_token and not (wiki_token and wiki_space_id):
+        click.echo("错误: 必须提供 --url 或 --document-token 或 (--wiki-token + --wiki-space-id)", err=True)
+        sys.exit(1)
+
+    try:
+        reader = FeishuReader()
+        result = reader.read(
+            url=url,
+            document_token=document_token,
+            wiki_token=wiki_token,
+            wiki_space_id=wiki_space_id,
+        )
+
+        if result.get("debug"):
+            click.echo(f"\n✗ 读取失败: {result['debug'].get('msg', 'Unknown error')}", err=True)
+            if debug:
+                click.echo(json.dumps(result["debug"], indent=2, ensure_ascii=False))
+            sys.exit(2)
+
+        click.echo(f"\n=== 标题 ===\n{result.get('title', '')}")
+        click.echo(f"\n=== 正文 ===\n{result.get('plain_text', '')}")
+        if debug:
+            click.echo(f"\n=== Debug ===\n{json.dumps(result, indent=2, ensure_ascii=False)}")
+        sys.exit(0)
+
+    except Exception as e:
+        click.echo(f"\n✗ 错误: {str(e)}", err=True)
         sys.exit(2)
 
 
